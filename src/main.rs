@@ -65,8 +65,8 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
 
         (&Method::GET, "/start") => {
             tokio::spawn(async {
-                let reciever = chromecast::getDefaultMediaReciever("192.168.8.106");
-                reciever.cast("http://192.168.8.103:3000/exec");
+                let receiver = chromecast::get_default_media_receiver("192.168.8.106");
+                receiver.cast("http://192.168.8.103:3000/exec");
             });
             let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::OK;
@@ -74,24 +74,24 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
         }
 
         (&Method::GET, "/pause") => {
-            let reciever = chromecast::getDefaultMediaReciever("192.168.8.106");
-            reciever.pause();
+            let receiver = chromecast::get_default_media_receiver("192.168.8.106");
+            receiver.pause();
             let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::OK;
             return Ok(response);
         }
 
         (&Method::GET, "/play") => {
-            let reciever = chromecast::getDefaultMediaReciever("192.168.8.106");
-            reciever.play();
+            let receiver = chromecast::get_default_media_receiver("192.168.8.106");
+            receiver.play();
             let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::OK;
             return Ok(response);
         }
 
         (&Method::GET, "/stop") => {
-            let reciever = chromecast::getDefaultMediaReciever("192.168.8.106");
-            reciever.stop();
+            let receiver = chromecast::get_default_media_receiver("192.168.8.106");
+            receiver.stop();
             let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::OK;
             return Ok(response);

@@ -12,36 +12,36 @@ const DEFAULT_DESTINATION_ID: &str = "receiver-0";
 const DEFAULT_PORT: u16 = 8009;
 
 /*
-let reciever = getDefaultMediaReciever("192.168.8.106")
-reciever.cast("http://commondatastorage.googleapis.com/gtv-videos-bucket/big_buck_bunny_1080p.mp4");
+let rec = get_default_media_receiver("192.168.8.106")
+rec.cast("http://commondatastorage.googleapis.com/gtv-videos-bucket/big_buck_bunny_1080p.mp4");
 
-reciever.pause();
-reciever.play();
+rec.pause();
+rec.play();
 // reciever.stop();
 */
 
-pub trait BaseMediaReciever {
+pub trait BaseMediaReceiver {
     fn play(&self);
     fn pause(&self);
     fn stop(&self);
     fn cast(&self, url: &str);
 }
 
-pub struct MediaReciever {
+pub struct MediaReceiver {
     ip: String,
     port: u16,
-    destId: String,
+    dest_id: String,
 }
 
-pub fn getDefaultMediaReciever(ip: &str) -> Box<dyn BaseMediaReciever> {
-    Box::new(MediaReciever {
+pub fn get_default_media_receiver(ip: &str) -> Box<dyn BaseMediaReceiver> {
+    Box::new(MediaReceiver {
         ip: ip.into(),
         port: DEFAULT_PORT,
-        destId: DEFAULT_DESTINATION_ID.into(),
+        dest_id: DEFAULT_DESTINATION_ID.into(),
     })
 }
 
-impl BaseMediaReciever for MediaReciever {
+impl BaseMediaReceiver for MediaReceiver {
     fn play(&self) {
         manage(self, ManageCommmand::Play);
     }
@@ -62,14 +62,17 @@ enum ManageCommmand {
     Stop,
 }
 
-fn manage(med: &MediaReciever, command: ManageCommmand) {
+fn manage(med: &MediaReceiver, command: ManageCommmand) {
     let cast_device = match CastDevice::connect_without_host_verification(med.ip.as_str(), med.port)
     {
         Ok(cast_device) => cast_device,
         Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
     };
 
-    cast_device.connection.connect(med.destId.as_str()).unwrap();
+    cast_device
+        .connection
+        .connect(med.dest_id.as_str())
+        .unwrap();
     cast_device.heartbeat.ping().unwrap();
     let app_to_manage = CastDeviceApp::DefaultMediaReceiver;
     let status = cast_device.receiver.get_status().unwrap();
@@ -118,14 +121,17 @@ fn manage(med: &MediaReciever, command: ManageCommmand) {
     }
 }
 
-fn cast(med: &MediaReciever, url: &str) {
+fn cast(med: &MediaReceiver, url: &str) {
     let cast_device = match CastDevice::connect_without_host_verification(med.ip.as_str(), med.port)
     {
         Ok(cast_device) => cast_device,
         Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
     };
 
-    cast_device.connection.connect(med.destId.as_str()).unwrap();
+    cast_device
+        .connection
+        .connect(med.dest_id.as_str())
+        .unwrap();
     cast_device.heartbeat.ping().unwrap();
 
     // Information about cast device.
