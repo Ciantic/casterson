@@ -8,3 +8,9 @@ edition = "2018"
 
 [dependencies]
 rust_cast = "0.14.0"
+hyper = "0.13"
+tokio = { version = "0.2", features = ["full"] }
+futures-util = "0.3.1"
+tokio-util = "0.2.0"
+bytes = "0.5.3"
+futures = "0.3.1"
