@@ -97,6 +97,14 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
             return Ok(response);
         }
 
+        (&Method::GET, "/current_time") => {
+            let receiver = chromecast::get_default_media_receiver("192.168.8.106");
+            let curr_time = receiver.get_current_time().unwrap();
+            let mut response = Response::new(Body::from(curr_time.to_string()));
+            *response.status_mut() = StatusCode::OK;
+            return Ok(response);
+        }
+
         // 404 not found
         _ => {
             let mut response = Response::new(Body::empty());

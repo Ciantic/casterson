@@ -25,6 +25,8 @@ pub trait BaseMediaReceiver {
     fn pause(&self);
     fn stop(&self);
     fn cast(&self, url: &str);
+    fn get_current_time(&self) -> Option<f32>;
+    // fn get_status(&self) -> Option<StatusEntry>;
 }
 
 pub struct MediaReceiver {
@@ -53,6 +55,9 @@ impl BaseMediaReceiver for MediaReceiver {
     }
     fn cast(&self, url: &str) {
         cast(self, url);
+    }
+    fn get_current_time(&self) -> Option<f32> {
+        get_current_time(self)
     }
 }
 
@@ -118,6 +123,45 @@ fn manage(med: &MediaReceiver, command: ManageCommmand) {
         None => {
             println!("manage: App not found");
         }
+    }
+}
+
+fn get_current_time(med: &MediaReceiver) -> Option<f32> {
+    let cast_device = match CastDevice::connect_without_host_verification(med.ip.as_str(), med.port)
+    {
+        Ok(cast_device) => cast_device,
+        Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
+    };
+
+    cast_device
+        .connection
+        .connect(med.dest_id.as_str())
+        .unwrap();
+    cast_device.heartbeat.ping().unwrap();
+    let app_to_manage = CastDeviceApp::DefaultMediaReceiver;
+    let status = cast_device.receiver.get_status().unwrap();
+    let app = status
+        .applications
+        .iter()
+        .find(|app| CastDeviceApp::from_str(app.app_id.as_str()).unwrap() == app_to_manage);
+
+    match app {
+        Some(app) => {
+            cast_device
+                .connection
+                .connect(app.transport_id.as_str())
+                .unwrap();
+            let status = cast_device
+                .media
+                .get_status(app.transport_id.as_str(), None)
+                .unwrap();
+            // let statusfirst = .unwrap();
+            // Some(StatusEntry::new(statusfirst))
+            // Some(statusfirst)
+            let stentry = status.entries.first().unwrap();
+            stentry.current_time
+        }
+        None => None,
     }
 }
 
