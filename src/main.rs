@@ -17,54 +17,46 @@ use chromecast::BaseMediaReceiver;
 
 async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let receiver = chromecast::get_default_media_receiver("192.168.8.106");
+    let mut response = Response::new(Body::empty());
     match (
         req.method(),
         req.uri().path().trim_start_matches("/chromecast"),
     ) {
         (&Method::GET, "/start") => {
-            tokio::spawn(async {
+            tokio::spawn(async move {
                 receiver.cast("http://192.168.8.103:3000/exec");
             });
-            let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::OK;
-            return Ok(response);
         }
 
         (&Method::GET, "/pause") => {
             receiver.pause();
-            let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::OK;
-            return Ok(response);
         }
 
         (&Method::GET, "/play") => {
             receiver.play();
-            let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::OK;
-            return Ok(response);
         }
 
         (&Method::GET, "/stop") => {
             receiver.stop();
-            let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::OK;
-            return Ok(response);
         }
 
-        (&Method::GET, "/current_time") => {
-            let curr_time = receiver.get_current_time().unwrap();
-            let mut response = Response::new(Body::from(curr_time.to_string()));
+        (&Method::GET, "/status") => {
+            let status = receiver.get_status().unwrap();
+            let json = serde_json::to_string(&status).unwrap();
+            response = Response::new(Body::from(json));
             *response.status_mut() = StatusCode::OK;
-            return Ok(response);
         }
 
         // 404 not found
         _ => {
-            let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::NOT_FOUND;
-            return Ok(response);
         }
     };
+    Ok(response)
 }
 
 async fn handle_other_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {

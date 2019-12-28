@@ -2,10 +2,12 @@ extern crate rust_cast;
 
 use rust_cast::channels::connection::ConnectionResponse;
 use rust_cast::channels::heartbeat::HeartbeatResponse;
-use rust_cast::channels::media::{Media, StatusEntry, StreamType};
+use rust_cast::channels::media::{IdleReason, Media, PlayerState, Status, StatusEntry, StreamType};
 use rust_cast::channels::receiver::CastDeviceApp;
 use rust_cast::{CastDevice, ChannelMessage};
+use serde::Serializer;
 
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 const DEFAULT_DESTINATION_ID: &str = "receiver-0";
@@ -20,16 +22,44 @@ rec.play();
 // reciever.stop();
 */
 
+fn serialize_player_state<S>(x: &PlayerState, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    s.serialize_str(x.to_string().as_str())
+}
+
+fn serialize_idle_reason<S>(x: &Option<IdleReason>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    s.serialize_str(match x {
+        Some(IdleReason::Cancelled) => "CANCELLED",
+        Some(IdleReason::Interrupted) => "INTERRUPTED",
+        Some(IdleReason::Finished) => "FINISHED",
+        Some(IdleReason::Error) => "ERROR",
+        _ => "",
+    })
+}
+
+#[derive(Serialize)]
+pub struct ChromecastStatus {
+    current_time: Option<f32>,
+    #[serde(serialize_with = "serialize_player_state")]
+    player_state: PlayerState,
+    #[serde(serialize_with = "serialize_idle_reason")]
+    idle_reason: Option<IdleReason>,
+}
+
 pub trait BaseMediaReceiver {
     fn play(&self);
     fn pause(&self);
     fn stop(&self);
     fn cast(&self, url: &str);
-    fn get_current_time(&self) -> Option<f32>;
-    // fn get_status(&self) -> Option<StatusEntry>;
+    fn get_status(&self) -> Option<ChromecastStatus>;
 }
 
-#[derive(Copy, Clone, Eq)]
+#[derive(Clone)]
 pub struct MediaReceiver {
     ip: String,
     port: u16,
@@ -57,8 +87,8 @@ impl BaseMediaReceiver for MediaReceiver {
     fn cast(&self, url: &str) {
         cast(self, url);
     }
-    fn get_current_time(&self) -> Option<f32> {
-        get_current_time(self)
+    fn get_status(&self) -> Option<ChromecastStatus> {
+        get_status(self)
     }
 }
 
@@ -127,7 +157,7 @@ fn manage(med: &MediaReceiver, command: ManageCommmand) {
     }
 }
 
-fn get_current_time(med: &MediaReceiver) -> Option<f32> {
+fn get_status(med: &MediaReceiver) -> Option<ChromecastStatus> {
     let cast_device = match CastDevice::connect_without_host_verification(med.ip.as_str(), med.port)
     {
         Ok(cast_device) => cast_device,
@@ -151,16 +181,18 @@ fn get_current_time(med: &MediaReceiver) -> Option<f32> {
             cast_device
                 .connection
                 .connect(app.transport_id.as_str())
-                .unwrap();
+                .ok()?;
             let status = cast_device
                 .media
                 .get_status(app.transport_id.as_str(), None)
-                .unwrap();
-            // let statusfirst = .unwrap();
-            // Some(StatusEntry::new(statusfirst))
-            // Some(statusfirst)
-            let stentry = status.entries.first().unwrap();
-            stentry.current_time
+                .ok()?
+                .entries
+                .pop()?;
+            Some(ChromecastStatus {
+                current_time: status.current_time,
+                player_state: status.player_state,
+                idle_reason: status.idle_reason,
+            })
         }
         None => None,
     }
