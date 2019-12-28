@@ -13,6 +13,7 @@ use tokio::process::Command;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
 mod chromecast;
+use chromecast::BaseMediaReceiver;
 
 async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let receiver = chromecast::get_default_media_receiver("192.168.8.106");
@@ -22,7 +23,7 @@ async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>,
     ) {
         (&Method::GET, "/start") => {
             tokio::spawn(async {
-                // receiver.clone().cast("http://192.168.8.103:3000/exec");
+                receiver.cast("http://192.168.8.103:3000/exec");
             });
             let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::OK;

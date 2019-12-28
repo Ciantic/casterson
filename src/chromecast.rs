@@ -36,12 +36,12 @@ pub struct MediaReceiver {
     dest_id: String,
 }
 
-pub fn get_default_media_receiver(ip: &str) -> Box<dyn BaseMediaReceiver> {
-    Box::new(MediaReceiver {
+pub fn get_default_media_receiver(ip: &str) -> MediaReceiver {
+    MediaReceiver {
         ip: ip.into(),
         port: DEFAULT_PORT,
         dest_id: DEFAULT_DESTINATION_ID.into(),
-    })
+    }
 }
 
 impl BaseMediaReceiver for MediaReceiver {
