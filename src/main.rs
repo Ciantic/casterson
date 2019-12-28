@@ -1,3 +1,5 @@
+extern crate clap;
+
 use bytes::BytesMut;
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
@@ -5,12 +7,17 @@ use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
 use hyper::{Method, StatusCode};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::process::Stdio;
 use tokio::fs::File;
 use tokio::process::Command;
 use tokio_util::codec::{BytesCodec, FramedRead};
+
+use clap::{App, Arg};
+
+use url::Url;
 
 mod chromecast;
 use chromecast::BaseMediaReceiver;
@@ -24,7 +31,7 @@ async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>,
     ) {
         (&Method::GET, "/start") => {
             tokio::spawn(async move {
-                receiver.cast("http://192.168.8.103:3000/exec");
+                receiver.cast("http://192.168.8.103:3000/file/encode");
             });
             *response.status_mut() = StatusCode::OK;
         }
@@ -60,21 +67,23 @@ async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>,
 }
 
 async fn handle_other_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    let mut response = Response::new(Body::empty());
+
+    let query = req.uri().query();
+    let parsedUri = Url::parse(&req.uri().to_string()).unwrap();
+    let params: HashMap<_, _> = parsedUri.query_pairs().into_owned().collect();
+
     match (req.method(), req.uri().path()) {
         // Stream a file from a disk
         (&Method::GET, "/file") => {
+            // let file =
             let stream = File::open("C:\\Source\\Backup_Ignore.txt")
                 .map_ok(|file| FramedRead::new(file, BytesCodec::new()).map_ok(BytesMut::freeze))
                 .try_flatten_stream();
-            let s = Body::wrap_stream(stream);
-            let mut response = Response::new(s);
-            return Ok(response);
+            response = Response::new(Body::wrap_stream(stream));
         }
 
-        // Stream from shell execute, e.g. using "curl" executable
-        //
-        // Borrows from: https://github.com/tokio-rs/tokio/blob/master/tokio/src/process/mod.rs
-        (&Method::GET, "/exec") => {
+        (&Method::GET, "/file/encode") => {
             let mut cmd = Command::new("ffmpeg");
             #[rustfmt::skip]
             cmd
@@ -93,28 +102,18 @@ async fn handle_other_request(req: Request<Body>) -> Result<Response<Body>, Infa
             let stdout = child.stdout().take().expect("panic! stdout failed!");
             let st = FramedRead::new(stdout, BytesCodec::new()).map_ok(BytesMut::freeze);
             let s = Body::wrap_stream(st);
-            let mut response = Response::new(s);
+            response = Response::new(s);
             response
                 .headers_mut()
                 .insert("Content-Type", HeaderValue::from_static("video/mp4"));
-            // // Ensure the child process is spawned in the runtime so it can
-            // // make progress on its own while we await for any output.
-            // tokio::spawn(async {
-            //     let status = child.await
-            //         .expect("child process encountered an error");
-
-            //     println!("child status was: {}", status);
-            // });
-            return Ok(response);
         }
 
         // 404 not found
         _ => {
-            let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::NOT_FOUND;
-            return Ok(response);
         }
     }
+    Ok(response)
 }
 
 async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
@@ -125,8 +124,29 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
     }
 }
 
+fn scan_media_files(dir: &str, extensions: Vec<&str>) -> Vec<String> {
+    unimplemented!()
+}
+
 #[tokio::main]
 async fn main() {
+    let matches = App::new("Casterson")
+        .version("0.1")
+        .author("Jari Pennanen <ciantic@oksidi.com>")
+        .about("It just keeps on casting")
+        .arg(
+            Arg::with_name("DIR")
+                .help("Directories to scan for media files")
+                .required(true)
+                .multiple(true)
+                .index(1),
+        )
+        .get_matches();
+
+    let dirs = matches.values_of("DIR").unwrap();
+
+    println!("Dirs {:?}", dirs);
+
     let addr = SocketAddr::from(([192, 168, 8, 103], 3000));
     let make_svc =
         make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle_request)) });
