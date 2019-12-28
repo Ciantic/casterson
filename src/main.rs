@@ -14,7 +14,59 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 
 mod chromecast;
 
-async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    let receiver = chromecast::get_default_media_receiver("192.168.8.106");
+    match (
+        req.method(),
+        req.uri().path().trim_start_matches("/chromecast"),
+    ) {
+        (&Method::GET, "/start") => {
+            tokio::spawn(async {
+                // receiver.clone().cast("http://192.168.8.103:3000/exec");
+            });
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::OK;
+            return Ok(response);
+        }
+
+        (&Method::GET, "/pause") => {
+            receiver.pause();
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::OK;
+            return Ok(response);
+        }
+
+        (&Method::GET, "/play") => {
+            receiver.play();
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::OK;
+            return Ok(response);
+        }
+
+        (&Method::GET, "/stop") => {
+            receiver.stop();
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::OK;
+            return Ok(response);
+        }
+
+        (&Method::GET, "/current_time") => {
+            let curr_time = receiver.get_current_time().unwrap();
+            let mut response = Response::new(Body::from(curr_time.to_string()));
+            *response.status_mut() = StatusCode::OK;
+            return Ok(response);
+        }
+
+        // 404 not found
+        _ => {
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::NOT_FOUND;
+            return Ok(response);
+        }
+    };
+}
+
+async fn handle_other_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     match (req.method(), req.uri().path()) {
         // Stream a file from a disk
         (&Method::GET, "/file") => {
@@ -63,55 +115,21 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
             return Ok(response);
         }
 
-        (&Method::GET, "/start") => {
-            tokio::spawn(async {
-                let receiver = chromecast::get_default_media_receiver("192.168.8.106");
-                receiver.cast("http://192.168.8.103:3000/exec");
-            });
-            let mut response = Response::new(Body::empty());
-            *response.status_mut() = StatusCode::OK;
-            return Ok(response);
-        }
-
-        (&Method::GET, "/pause") => {
-            let receiver = chromecast::get_default_media_receiver("192.168.8.106");
-            receiver.pause();
-            let mut response = Response::new(Body::empty());
-            *response.status_mut() = StatusCode::OK;
-            return Ok(response);
-        }
-
-        (&Method::GET, "/play") => {
-            let receiver = chromecast::get_default_media_receiver("192.168.8.106");
-            receiver.play();
-            let mut response = Response::new(Body::empty());
-            *response.status_mut() = StatusCode::OK;
-            return Ok(response);
-        }
-
-        (&Method::GET, "/stop") => {
-            let receiver = chromecast::get_default_media_receiver("192.168.8.106");
-            receiver.stop();
-            let mut response = Response::new(Body::empty());
-            *response.status_mut() = StatusCode::OK;
-            return Ok(response);
-        }
-
-        (&Method::GET, "/current_time") => {
-            let receiver = chromecast::get_default_media_receiver("192.168.8.106");
-            let curr_time = receiver.get_current_time().unwrap();
-            let mut response = Response::new(Body::from(curr_time.to_string()));
-            *response.status_mut() = StatusCode::OK;
-            return Ok(response);
-        }
-
         // 404 not found
         _ => {
             let mut response = Response::new(Body::empty());
             *response.status_mut() = StatusCode::NOT_FOUND;
             return Ok(response);
         }
-    };
+    }
+}
+
+async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    if req.uri().path().starts_with("/chromecast") {
+        handle_chromecast_request(req).await
+    } else {
+        handle_other_request(req).await
+    }
 }
 
 #[tokio::main]

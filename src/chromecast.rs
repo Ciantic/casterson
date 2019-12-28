@@ -29,6 +29,7 @@ pub trait BaseMediaReceiver {
     // fn get_status(&self) -> Option<StatusEntry>;
 }
 
+#[derive(Copy, Clone, Eq)]
 pub struct MediaReceiver {
     ip: String,
     port: u16,
