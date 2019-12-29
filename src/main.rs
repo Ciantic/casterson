@@ -9,6 +9,7 @@ use hyper::{Body, Request, Response, Server};
 use hyper::{Method, StatusCode};
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::process::Stdio;
 use tokio::fs::File;
@@ -135,6 +136,28 @@ async fn main() {
         .author("Jari Pennanen <ciantic@oksidi.com>")
         .about("It just keeps on casting")
         .arg(
+            Arg::with_name("IP")
+                .long("ip")
+                .help("IP address of the casterson server")
+                .default_value("0.0.0.0")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("PORT")
+                .long("port")
+                .help("Port of casterson server")
+                .default_value("3000")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("MEDIA_EXTS")
+                .long("media-exts")
+                .short("e")
+                .help("Media file extensions")
+                .default_value("mp4,mkv,avi,mov")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("DIR")
                 .help("Directories to scan for media files")
                 .required(true)
@@ -144,10 +167,21 @@ async fn main() {
         .get_matches();
 
     let dirs = matches.values_of("DIR").unwrap();
+    let port: u16 = matches
+        .value_of("PORT")
+        .unwrap()
+        .parse()
+        .expect("Port in incorrect format");
+    let ip: IpAddr = matches
+        .value_of("IP")
+        .unwrap()
+        .parse()
+        .expect("IP Address in incorrect format");
+    let exts = matches.value_of("MEDIA_EXTS").unwrap();
 
     println!("Dirs {:?}", dirs);
 
-    let addr = SocketAddr::from(([192, 168, 8, 103], 3000));
+    let addr = SocketAddr::from((ip, port));
     let make_svc =
         make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle_request)) });
     let server = Server::bind(&addr).serve(make_svc);
