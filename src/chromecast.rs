@@ -164,13 +164,13 @@ fn get_status(med: &MediaReceiver) -> Option<ChromecastStatus> {
         Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
     };
 
-    cast_device
-        .connection
-        .connect(med.dest_id.as_str())
-        .unwrap();
-    cast_device.heartbeat.ping().unwrap();
+    // Connect and ping
+    cast_device.connection.connect(med.dest_id.as_str()).ok()?;
+    cast_device.heartbeat.ping().ok()?;
+
+    // Manage app
     let app_to_manage = CastDeviceApp::DefaultMediaReceiver;
-    let status = cast_device.receiver.get_status().unwrap();
+    let status = cast_device.receiver.get_status().ok()?;
     let app = status
         .applications
         .iter()

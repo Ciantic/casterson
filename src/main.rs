@@ -69,9 +69,9 @@ async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>,
 async fn handle_other_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let mut response = Response::new(Body::empty());
 
-    let query = req.uri().query();
-    let parsedUri = Url::parse(&req.uri().to_string()).unwrap();
-    let params: HashMap<_, _> = parsedUri.query_pairs().into_owned().collect();
+    // let query = req.uri().query();
+    // let parsedUri = Url::parse(&req.uri().to_string()).unwrap();
+    // let params: HashMap<_, _> = parsedUri.query_pairs().into_owned().collect();
 
     match (req.method(), req.uri().path()) {
         // Stream a file from a disk
