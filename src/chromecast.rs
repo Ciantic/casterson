@@ -2,12 +2,12 @@ extern crate rust_cast;
 
 use rust_cast::channels::connection::ConnectionResponse;
 use rust_cast::channels::heartbeat::HeartbeatResponse;
-use rust_cast::channels::media::{IdleReason, Media, PlayerState, Status, StatusEntry, StreamType};
+use rust_cast::channels::media::{IdleReason, Media, PlayerState, StreamType};
 use rust_cast::channels::receiver::CastDeviceApp;
 use rust_cast::{CastDevice, ChannelMessage};
 use serde::Serializer;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::str::FromStr;
 
 const DEFAULT_DESTINATION_ID: &str = "receiver-0";
@@ -225,7 +225,9 @@ fn cast(med: &MediaReceiver, url: &str) {
         .connection
         .connect(app.transport_id.as_str())
         .unwrap();
-    let media = cast_device
+
+    // Start casting, returns also a status
+    cast_device
         .media
         .load(
             app.transport_id.as_str(),
@@ -253,12 +255,12 @@ fn cast(med: &MediaReceiver, url: &str) {
                     cast_device.heartbeat.pong().unwrap();
                 }
             }
+            Ok(ChannelMessage::Connection(ConnectionResponse::Close)) => {
+                println!("[Close connection]");
+                break;
+            }
 
             Ok(ChannelMessage::Connection(response)) => match response {
-                ConnectionResponse::Close => {
-                    println!("[Close connection]");
-                    break;
-                }
                 _ => println!("[Connection] {:?}", response),
             },
             Ok(ChannelMessage::Media(response)) => println!("[Media] {:?}", response),

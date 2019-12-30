@@ -1,7 +1,5 @@
 use bytes::BytesMut;
-use clap::{App, Arg};
-use crossbeam::channel::{Receiver, Sender};
-use crossbeam::unbounded;
+use crossbeam::channel::Sender;
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
 use hyper::header::HeaderValue;
@@ -11,36 +9,30 @@ use hyper::{Method, StatusCode};
 use std::convert::Infallible;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use structopt::StructOpt;
 use tokio::fs::File;
 use tokio::process::Command;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
-#[path = "msg.rs"]
-pub mod msg;
+use crate::chromecast;
+use crate::chromecast::BaseMediaReceiver;
+use crate::msg;
 
-#[path = "chromecast.rs"]
-mod chromecast;
-use chromecast::BaseMediaReceiver;
-
-pub struct RequestState {
+struct RequestState {
     pub foo: u32,
     pub zoo: Vec<u32>,
     pub notifier: Sender<msg::NotifyMessage>,
 }
 
 pub async fn create_server(notify: Sender<msg::NotifyMessage>, ip: IpAddr, port: u16) {
-    println!("Starting server at {}:{}", ip, port);
+    println!("Server listening at: {}:{}", ip, port);
     let state = Arc::new(RequestState {
         foo: 321,
         zoo: vec![1, 2, 3],
         notifier: notify.clone(),
     });
     let addr = SocketAddr::from((ip, port));
-    let (notify, rec) = unbounded::<msg::NotifyMessage>();
     let make_svc = make_service_fn(move |_| {
         let state_con = Arc::clone(&state);
         async move {
@@ -51,24 +43,13 @@ pub async fn create_server(notify: Sender<msg::NotifyMessage>, ip: IpAddr, port:
         }
     });
     let server = Server::bind(&addr).serve(make_svc);
-    tokio::spawn(async move {
-        loop {
-            let value = rec.recv().unwrap();
-            match value {
-                msg::NotifyMessage::EncodingStarted => {
-                    println!("Encoding börjat");
-                }
-                msg::NotifyMessage::RequestClosed => println!("Request closed"),
-            }
-        }
-        println!("Listener closed!");
-    });
     if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
+        eprintln!("Server error: {}", e);
     }
+    println!("Server closed");
 }
 
-pub async fn handle_request(
+async fn handle_request(
     state: &RequestState,
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
