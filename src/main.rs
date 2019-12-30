@@ -1,31 +1,23 @@
 extern crate clap;
 
 use bytes::BytesMut;
-use futures::future;
-use futures::future::Future;
+use clap::{App, Arg};
+use crossbeam::channel::{Receiver, Sender};
+use crossbeam::unbounded;
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
 use hyper::header::HeaderValue;
-use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Error, Request, Response, Server};
+use hyper::{Body, Request, Response, Server};
 use hyper::{Method, StatusCode};
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::process::Stdio;
-use std::rc::Rc;
 use std::sync::Arc;
-use std::task::Context;
-use std::task::Poll;
 use tokio::fs::File;
 use tokio::process::Command;
 use tokio_util::codec::{BytesCodec, FramedRead};
-
-use clap::{App, Arg};
-
 use url::Url;
 
 mod chromecast;
@@ -75,7 +67,10 @@ async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>,
     Ok(response)
 }
 
-async fn handle_other_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn handle_other_request(
+    state: &RequestState,
+    req: Request<Body>,
+) -> Result<Response<Body>, Infallible> {
     let mut response = Response::new(Body::empty());
 
     // let query = req.uri().query();
@@ -93,6 +88,7 @@ async fn handle_other_request(req: Request<Body>) -> Result<Response<Body>, Infa
         }
 
         (&Method::GET, "/file/encode") => {
+            state.notifier.send(NotifyMessage::EncodingStarted).unwrap();
             let mut cmd = Command::new("ffmpeg");
             #[rustfmt::skip]
             cmd
@@ -129,12 +125,10 @@ async fn handle_request(
     state: &RequestState,
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
-    // Ok(Response::new(Body::from(state.foo.to_string())))
-
     if req.uri().path().starts_with("/chromecast") {
         handle_chromecast_request(req).await
     } else {
-        handle_other_request(req).await
+        handle_other_request(state, req).await
     }
 }
 
@@ -142,8 +136,15 @@ fn scan_media_files(dir: &str, extensions: Vec<&str>) -> Vec<String> {
     unimplemented!()
 }
 
+enum NotifyMessage {
+    EncodingStarted,
+    RequestClosed,
+}
+
 struct RequestState {
-    foo: u32,
+    pub foo: u32,
+    pub zoo: Vec<u32>,
+    pub notifier: Sender<NotifyMessage>,
 }
 
 #[tokio::main]
@@ -204,21 +205,40 @@ async fn main() {
     println!("Dirs {:?} {:?}", dirs, exts);
 
     let addr = SocketAddr::from((ip, port));
-    let state = Arc::new(RequestState { foo: 321 });
-    let make_svc = make_service_fn(|_| {
+    let (notify, rec) = unbounded::<NotifyMessage>();
+    let state = Arc::new(RequestState {
+        foo: 321,
+        zoo: [1, 2, 3].to_vec(),
+        notifier: notify.clone(),
+    });
+    let make_svc = make_service_fn(move |_| {
         let onion1 = Arc::clone(&state);
+        // let onion11 = Arc::clone(&notifier);
         async move {
-            let onion2 = Arc::clone(&onion1);
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-                let onion3 = Arc::clone(&onion2);
+                let onion3 = Arc::clone(&onion1);
+                // let notifier = Arc::clone(&onion11);
                 async move {
                     let onion4 = &*onion3;
+                    // let foo = &*notifier;
                     handle_request(onion4, req).await
                 }
             }))
         }
     });
     let server = Server::bind(&addr).serve(make_svc);
+    tokio::spawn(async move {
+        loop {
+            let value = rec.recv().unwrap();
+            match value {
+                NotifyMessage::EncodingStarted => {
+                    println!("Encoding börjat");
+                }
+                NotifyMessage::RequestClosed => println!("Request closed"),
+            }
+        }
+        println!("Listener closed!");
+    });
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);
     }
