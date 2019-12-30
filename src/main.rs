@@ -13,12 +13,13 @@ use hyper::{Method, StatusCode};
 use std::convert::Infallible;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use structopt::StructOpt;
 use tokio::fs::File;
 use tokio::process::Command;
 use tokio_util::codec::{BytesCodec, FramedRead};
-use url::Url;
 
 mod chromecast;
 use chromecast::BaseMediaReceiver;
@@ -111,6 +112,9 @@ async fn handle_other_request(
             response
                 .headers_mut()
                 .insert("Content-Type", HeaderValue::from_static("video/mp4"));
+            response
+                .headers_mut()
+                .insert("Cache-Control", HeaderValue::from_static("no-cache"));
         }
 
         // 404 not found
@@ -147,8 +151,35 @@ struct RequestState {
     pub notifier: Sender<NotifyMessage>,
 }
 
+#[derive(StructOpt, Debug)]
+#[structopt(name = "basic")]
+struct CliOpts {
+    // The number of occurrences of the `v/verbose` flag
+    /// Verbose mode (-v, -vv, -vvv, etc.)
+    #[structopt(short, long, parse(from_occurrences))]
+    verbose: u8,
+
+    /// IP address of the casterson server
+    #[structopt(short, long, default_value = "0.0.0.0")]
+    ip: IpAddr,
+
+    /// Port of casterson server
+    #[structopt(short, long, default_value = "3000")]
+    port: u16,
+
+    /// Media extensions
+    #[structopt(short, long, default_value = "mp4,mkv,avi,mov", value_delimiter = ",")]
+    media_exts: Vec<String>,
+
+    /// Directories of media files
+    #[structopt(name = "DIR", parse(from_os_str))]
+    dir: Vec<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() {
+    let opt = CliOpts::from_args();
+
     let matches = App::new("Casterson")
         .version("0.1")
         .author("Jari Pennanen <ciantic@oksidi.com>")
@@ -184,27 +215,7 @@ async fn main() {
         )
         .get_matches();
 
-    let dirs = matches.values_of("DIR").unwrap();
-    let port: u16 = matches
-        .value_of("PORT")
-        .unwrap()
-        .parse()
-        .expect("Port in incorrect format");
-    let ip: IpAddr = matches
-        .value_of("IP")
-        .unwrap()
-        .parse()
-        .expect("IP Address in incorrect format");
-    let exts: Vec<String> = matches
-        .value_of("MEDIA_EXTS")
-        .unwrap()
-        .split(',')
-        .map(str::to_lowercase)
-        .collect();
-
-    println!("Dirs {:?} {:?}", dirs, exts);
-
-    let addr = SocketAddr::from((ip, port));
+    let addr = SocketAddr::from((opt.ip, opt.port));
     let (notify, rec) = unbounded::<NotifyMessage>();
     let state = Arc::new(RequestState {
         foo: 321,
@@ -212,17 +223,11 @@ async fn main() {
         notifier: notify.clone(),
     });
     let make_svc = make_service_fn(move |_| {
-        let onion1 = Arc::clone(&state);
-        // let onion11 = Arc::clone(&notifier);
+        let state_con = Arc::clone(&state);
         async move {
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-                let onion3 = Arc::clone(&onion1);
-                // let notifier = Arc::clone(&onion11);
-                async move {
-                    let onion4 = &*onion3;
-                    // let foo = &*notifier;
-                    handle_request(onion4, req).await
-                }
+                let state_req = Arc::clone(&state_con);
+                async move { handle_request(&*state_req, req).await }
             }))
         }
     });
