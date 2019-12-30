@@ -1,17 +1,25 @@
 extern crate clap;
 
 use bytes::BytesMut;
+use futures::future;
+use futures::future::Future;
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
 use hyper::header::HeaderValue;
+use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
+use hyper::{Body, Error, Request, Response, Server};
 use hyper::{Method, StatusCode};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::process::Stdio;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::task::Context;
+use std::task::Poll;
 use tokio::fs::File;
 use tokio::process::Command;
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -117,7 +125,12 @@ async fn handle_other_request(req: Request<Body>) -> Result<Response<Body>, Infa
     Ok(response)
 }
 
-async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn handle_request(
+    state: &RequestState,
+    req: Request<Body>,
+) -> Result<Response<Body>, Infallible> {
+    // Ok(Response::new(Body::from(state.foo.to_string())))
+
     if req.uri().path().starts_with("/chromecast") {
         handle_chromecast_request(req).await
     } else {
@@ -127,6 +140,10 @@ async fn handle_request(req: Request<Body>) -> Result<Response<Body>, Infallible
 
 fn scan_media_files(dir: &str, extensions: Vec<&str>) -> Vec<String> {
     unimplemented!()
+}
+
+struct RequestState {
+    foo: u32,
 }
 
 #[tokio::main]
@@ -177,13 +194,30 @@ async fn main() {
         .unwrap()
         .parse()
         .expect("IP Address in incorrect format");
-    let exts = matches.value_of("MEDIA_EXTS").unwrap();
+    let exts: Vec<String> = matches
+        .value_of("MEDIA_EXTS")
+        .unwrap()
+        .split(',')
+        .map(str::to_lowercase)
+        .collect();
 
-    println!("Dirs {:?}", dirs);
+    println!("Dirs {:?} {:?}", dirs, exts);
 
     let addr = SocketAddr::from((ip, port));
-    let make_svc =
-        make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle_request)) });
+    let state = Arc::new(RequestState { foo: 321 });
+    let make_svc = make_service_fn(|_| {
+        let onion1 = Arc::clone(&state);
+        async move {
+            let onion2 = Arc::clone(&onion1);
+            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
+                let onion3 = Arc::clone(&onion2);
+                async move {
+                    let onion4 = &*onion3;
+                    handle_request(onion4, req).await
+                }
+            }))
+        }
+    });
     let server = Server::bind(&addr).serve(make_svc);
     if let Err(e) = server.await {
         eprintln!("server error: {}", e);
