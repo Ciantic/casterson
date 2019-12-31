@@ -1,4 +1,5 @@
 use bytes::BytesMut;
+use std::net::IpAddr;
 
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
