@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use crossbeam::channel::Sender;
+
 use futures_util::TryFutureExt;
 use futures_util::TryStreamExt;
 use hyper::header::HeaderValue;
@@ -7,35 +7,26 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
 use hyper::{Method, StatusCode};
 use std::convert::Infallible;
-use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::process::Stdio;
 use std::sync::Arc;
 use tokio::fs::File;
-use tokio::process::Command;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
 use crate::chromecast;
 use crate::chromecast::BaseMediaReceiver;
+use crate::media;
 use crate::msg;
+use crate::AppState;
 
-struct RequestState {
-    pub foo: u32,
-    pub zoo: Vec<u32>,
-    pub notifier: Sender<msg::NotifyMessage>,
-}
+pub async fn create_server(state: Arc<AppState>) {
+    println!("Server listening at: {}:{}", state.opts.ip, state.opts.port);
+    let addr = SocketAddr::from((state.opts.ip, state.opts.port));
 
-pub async fn create_server(notify: Sender<msg::NotifyMessage>, ip: IpAddr, port: u16) {
-    println!("Server listening at: {}:{}", ip, port);
-    let state = Arc::new(RequestState {
-        foo: 321,
-        zoo: vec![1, 2, 3],
-        notifier: notify.clone(),
-    });
-    let addr = SocketAddr::from((ip, port));
+    // Creates a service creator "MakeSvc"
     let make_svc = make_service_fn(move |_| {
         let state_con = Arc::clone(&state);
         async move {
+            // Creates a "Service" from asyncfunction
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
                 let state_req = Arc::clone(&state_con);
                 async move { handle_request(&*state_req, req).await }
@@ -50,7 +41,7 @@ pub async fn create_server(notify: Sender<msg::NotifyMessage>, ip: IpAddr, port:
 }
 
 async fn handle_request(
-    state: &RequestState,
+    state: &AppState,
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
     if req.uri().path().starts_with("/chromecast") {
@@ -105,7 +96,7 @@ async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>,
 }
 
 async fn handle_other_request(
-    state: &RequestState,
+    state: &AppState,
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
     let mut response = Response::new(Body::empty());
@@ -115,6 +106,10 @@ async fn handle_other_request(
     // let params: HashMap<_, _> = parsedUri.query_pairs().into_owned().collect();
 
     match (req.method(), req.uri().path()) {
+        (&Method::GET, "/media_files") => {
+            let media_files = media::scan_media_files(&state.opts.dir, &state.opts.media_exts);
+        }
+
         // Stream a file from a disk
         (&Method::GET, "/file") => {
             // let file =
@@ -129,22 +124,8 @@ async fn handle_other_request(
                 .notifier
                 .send(msg::NotifyMessage::EncodingStarted)
                 .unwrap();
-            let mut cmd = Command::new("ffmpeg");
-            #[rustfmt::skip]
-            cmd
-                .arg("-hwaccel").arg("dxva2")
-                .arg("-i").arg("\\\\192.168.8.150\\Downloads\\Big.Buck.Bunny\\big_buck_bunny.mp4")
-                .arg("-acodec").arg("aac")
-                .arg("-c:v").arg("h264_nvenc")
-                .arg("-preset").arg("slow")
-                .arg("-b:v").arg("8M")
-                .arg("-movflags").arg("frag_keyframe+empty_moov")
-                .arg("-f").arg("mp4")
-                .arg("pipe:1")
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            let mut child = cmd.spawn().expect("panic! failed to spawn");
-            let stdout = child.stdout().take().expect("panic! stdout failed!");
+            let stdout =
+                media::encode("\\\\192.168.8.150\\Downloads\\Big.Buck.Bunny\\big_buck_bunny.mp4");
             let st = FramedRead::new(stdout, BytesCodec::new()).map_ok(BytesMut::freeze);
             let s = Body::wrap_stream(st);
             response = Response::new(s);

@@ -1,9 +1,11 @@
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::process::Stdio;
+use tokio::process::Command;
 use walkdir;
 
-pub fn scan_media_files(dirs: &[PathBuf], exts: &[String]) -> Vec<PathBuf> {
+pub fn scan_media_files<S: AsRef<OsStr>>(dirs: &[PathBuf], exts: &[S]) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = vec![];
     let exts_os: Vec<OsString> = exts.iter().map(OsString::from).collect();
     for dir in dirs {
@@ -19,4 +21,23 @@ pub fn scan_media_files(dirs: &[PathBuf], exts: &[String]) -> Vec<PathBuf> {
         }
     }
     paths
+}
+
+pub fn encode<S: AsRef<OsStr>>(file: S) -> tokio::process::ChildStdout {
+    let mut cmd = Command::new("ffmpeg");
+    #[rustfmt::skip]
+    cmd
+        .arg("-hwaccel").arg("dxva2")
+        .arg("-i").arg(file)
+        .arg("-acodec").arg("aac")
+        .arg("-c:v").arg("h264_nvenc")
+        .arg("-preset").arg("slow")
+        .arg("-b:v").arg("8M")
+        .arg("-movflags").arg("frag_keyframe+empty_moov")
+        .arg("-f").arg("mp4")
+        .arg("pipe:1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("panic! failed to spawn");
+    child.stdout().take().expect("panic! stdout failed!")
 }

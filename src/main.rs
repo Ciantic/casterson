@@ -1,9 +1,11 @@
 extern crate clap;
 
+use crossbeam::channel::Sender;
 use crossbeam::unbounded;
 use std::io::Result as IOResult;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use structopt::StructOpt;
 
 pub mod api;
@@ -13,7 +15,7 @@ pub mod msg;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "basic")]
-struct CliOpts {
+pub struct CliOpts {
     // The number of occurrences of the `v/verbose` flag
     /// Verbose mode (-v, -vv, -vvv, etc.)
     #[structopt(short, long, parse(from_occurrences))]
@@ -36,13 +38,21 @@ struct CliOpts {
     dir: Vec<PathBuf>,
 }
 
+pub struct AppState {
+    pub opts: CliOpts,
+    pub notifier: Sender<msg::NotifyMessage>,
+}
+
 #[tokio::main]
 async fn main() {
-    let opt = CliOpts::from_args();
-    for dir in opt.dir {
+    let (notify, rec) = unbounded::<msg::NotifyMessage>();
+    let state = Arc::new(AppState {
+        opts: CliOpts::from_args(),
+        notifier: notify.clone(),
+    });
+    for dir in &*state.opts.dir {
         println!("Using media directory: {}", dir.display());
     }
-    let (notify, rec) = unbounded::<msg::NotifyMessage>();
     tokio::spawn(async move {
         loop {
             let value = rec.recv().unwrap();
@@ -54,7 +64,7 @@ async fn main() {
             }
         }
     });
-    api::create_server(notify.clone(), opt.ip, opt.port).await;
+    api::create_server(state).await;
 }
 
 /// Parse path and canonicalize
