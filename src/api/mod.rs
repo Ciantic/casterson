@@ -1,4 +1,5 @@
 use bytes::BytesMut;
+use serde::Serializer;
 use std::net::IpAddr;
 
 use futures_util::TryFutureExt;
@@ -7,6 +8,7 @@ use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
 use hyper::{Method, StatusCode};
+use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -19,6 +21,46 @@ use crate::media;
 use crate::msg;
 use crate::AppState;
 
+#[derive(Debug)]
+enum ApiError {
+    NotFound,
+    ChromecastError(chromecast::ChromecastError),
+    JsonError(serde_json::error::Error),
+    // HyperError(hyper::error::Error),
+}
+
+#[derive(Serialize)]
+struct ApiJsonError {
+    error: String,
+    msg: String,
+    // Ideally there would be union of actual data payload, but unions aren't
+    // ready yet in Rust
+    // data: ...
+}
+
+// Convert ApiError to response
+impl Into<ApiJsonError> for ApiError {
+    fn into(self) -> ApiJsonError {
+        match self {
+            ApiError::JsonError(err) => ApiJsonError {
+                error: "JSON_ERROR".into(),
+                msg: err.to_string(),
+            },
+
+            _ => ApiJsonError {
+                error: "UNKNOWN".into(),
+                msg: "".into(),
+            },
+        }
+    }
+}
+
+type ApiResponse<S>
+where
+    S: Serializer,
+= Result<S, ApiError>;
+
+/// Create hyper server
 pub async fn create_server(state: Arc<AppState>) {
     println!("Server listening at: {}:{}", state.opts.ip, state.opts.port);
     let addr = SocketAddr::from((state.opts.ip, state.opts.port));
@@ -41,47 +83,74 @@ pub async fn create_server(state: Arc<AppState>) {
     println!("Server closed");
 }
 
+async fn handle_request2(state: &AppState) -> ApiResponse<()> {
+    unimplemented!()
+}
+
 async fn handle_request(
     state: &AppState,
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
-    if req.uri().path().starts_with("/chromecast") {
-        handle_chromecast_request(req).await
-    } else {
-        handle_other_request(state, req).await
+    let resp = {
+        if req.uri().path().starts_with("/chromecast") {
+            handle_chromecast_request(req).await
+        } else {
+            handle_other_request(state, req).await
+        }
+    };
+    match resp {
+        Ok(v) => Ok(v),
+        Err(err) => Ok(Response::new(Body::from({
+            let v: ApiJsonError = err.into();
+            serde_json::to_string_pretty(&v).unwrap()
+        }))),
     }
 }
 
-async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-    let receiver = chromecast::get_default_media_receiver("192.168.8.106");
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ChromecastRequest {
+    ip: IpAddr,
+    port: Option<u16>,
+    dest_id: Option<String>,
+}
+
+async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>, ApiError> {
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
+    let value = serde_json::from_slice::<ChromecastRequest>(&body).map_err(ApiError::JsonError)?;
+
+    println!("value {:?}", value);
+
+    let receiver = chromecast::get_default_media_receiver(&value.ip, value.port, value.dest_id);
     let mut response = Response::new(Body::empty());
-    match (
-        req.method(),
-        req.uri().path().trim_start_matches("/chromecast"),
-    ) {
-        (&Method::GET, "/start") => {
+
+    match (method, uri.path().trim_start_matches("/chromecast")) {
+        (Method::POST, "/start") => {
             tokio::spawn(async move {
-                receiver.cast("http://192.168.8.103:3000/file/encode");
+                receiver
+                    .cast("http://192.168.8.103:3000/file/encode")
+                    .unwrap();
             });
             *response.status_mut() = StatusCode::OK;
         }
 
-        (&Method::GET, "/pause") => {
-            receiver.pause();
+        (Method::POST, "/pause") => {
+            receiver.pause().map_err(ApiError::ChromecastError)?;
             *response.status_mut() = StatusCode::OK;
         }
 
-        (&Method::GET, "/play") => {
-            receiver.play();
+        (Method::POST, "/play") => {
+            receiver.play().map_err(ApiError::ChromecastError)?;
             *response.status_mut() = StatusCode::OK;
         }
 
-        (&Method::GET, "/stop") => {
-            receiver.stop();
+        (Method::POST, "/stop") => {
+            receiver.stop().map_err(ApiError::ChromecastError)?;
             *response.status_mut() = StatusCode::OK;
         }
 
-        (&Method::GET, "/status") => {
+        (Method::POST, "/status") => {
             let status = receiver.get_status().unwrap();
             let json = serde_json::to_string(&status).unwrap();
             response = Response::new(Body::from(json));
@@ -99,7 +168,7 @@ async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>,
 async fn handle_other_request(
     state: &AppState,
     req: Request<Body>,
-) -> Result<Response<Body>, Infallible> {
+) -> Result<Response<Body>, ApiError> {
     let mut response = Response::new(Body::empty());
 
     // let query = req.uri().query();

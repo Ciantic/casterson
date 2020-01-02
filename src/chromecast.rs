@@ -4,8 +4,10 @@ use rust_cast::channels::connection::ConnectionResponse;
 use rust_cast::channels::heartbeat::HeartbeatResponse;
 use rust_cast::channels::media::{IdleReason, Media, PlayerState, StreamType};
 use rust_cast::channels::receiver::CastDeviceApp;
+use rust_cast::errors::Error;
 use rust_cast::{CastDevice, ChannelMessage};
 use serde::Serializer;
+use std::net::IpAddr;
 
 use serde::Serialize;
 use std::str::FromStr;
@@ -13,12 +15,19 @@ use std::str::FromStr;
 const DEFAULT_DESTINATION_ID: &str = "receiver-0";
 const DEFAULT_PORT: u16 = 8009;
 
+#[derive(Debug)]
+pub enum ChromecastError {
+    AppNotFound,
+    AppStatusNotFound,
+    RustCastError(Error),
+}
+
 /*
 let rec = get_default_media_receiver("192.168.8.106")
-rec.cast("http://commondatastorage.googleapis.com/gtv-videos-bucket/big_buck_bunny_1080p.mp4");
+rec.cast("http://commondatastorage.googleapis.com/gtv-videos-bucket/big_buck_bunny_1080p.mp4").unwrap();
 
-rec.pause();
-rec.play();
+rec.pause().unwrap();
+rec.play().unwrap();
 // reciever.stop();
 */
 
@@ -52,42 +61,46 @@ pub struct ChromecastStatus {
 }
 
 pub trait BaseMediaReceiver {
-    fn play(&self);
-    fn pause(&self);
-    fn stop(&self);
-    fn cast(&self, url: &str);
-    fn get_status(&self) -> Option<ChromecastStatus>;
+    fn play(&self) -> Result<(), ChromecastError>;
+    fn pause(&self) -> Result<(), ChromecastError>;
+    fn stop(&self) -> Result<(), ChromecastError>;
+    fn cast(&self, url: &str) -> Result<(), ChromecastError>;
+    fn get_status(&self) -> Result<ChromecastStatus, ChromecastError>;
 }
 
 #[derive(Clone)]
 pub struct MediaReceiver {
-    ip: String,
+    ip: IpAddr,
     port: u16,
     dest_id: String,
 }
 
-pub fn get_default_media_receiver(ip: &str) -> MediaReceiver {
+pub fn get_default_media_receiver(
+    ip: &IpAddr,
+    port: Option<u16>,
+    dest_id: Option<String>,
+) -> MediaReceiver {
     MediaReceiver {
-        ip: ip.into(),
-        port: DEFAULT_PORT,
-        dest_id: DEFAULT_DESTINATION_ID.into(),
+        ip: *ip,
+        port: port.unwrap_or(DEFAULT_PORT),
+        dest_id: dest_id.unwrap_or(DEFAULT_DESTINATION_ID.into()),
     }
 }
 
 impl BaseMediaReceiver for MediaReceiver {
-    fn play(&self) {
-        manage(self, ManageCommmand::Play);
+    fn play(&self) -> Result<(), ChromecastError> {
+        manage(self, ManageCommmand::Play)
     }
-    fn pause(&self) {
-        manage(self, ManageCommmand::Pause);
+    fn pause(&self) -> Result<(), ChromecastError> {
+        manage(self, ManageCommmand::Pause)
     }
-    fn stop(&self) {
-        manage(self, ManageCommmand::Stop);
+    fn stop(&self) -> Result<(), ChromecastError> {
+        manage(self, ManageCommmand::Stop)
     }
-    fn cast(&self, url: &str) {
-        cast(self, url);
+    fn cast(&self, url: &str) -> Result<(), ChromecastError> {
+        cast(self, url)
     }
-    fn get_status(&self) -> Option<ChromecastStatus> {
+    fn get_status(&self) -> Result<ChromecastStatus, ChromecastError> {
         get_status(self)
     }
 }
@@ -98,12 +111,12 @@ enum ManageCommmand {
     Stop,
 }
 
-fn manage(med: &MediaReceiver, command: ManageCommmand) {
-    let cast_device = match CastDevice::connect_without_host_verification(med.ip.as_str(), med.port)
-    {
-        Ok(cast_device) => cast_device,
-        Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
-    };
+fn manage(med: &MediaReceiver, command: ManageCommmand) -> Result<(), ChromecastError> {
+    let cast_device =
+        match CastDevice::connect_without_host_verification(med.ip.to_string(), med.port) {
+            Ok(cast_device) => cast_device,
+            Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
+        };
 
     cast_device
         .connection
@@ -129,48 +142,52 @@ fn manage(med: &MediaReceiver, command: ManageCommmand) {
             let status = status.entries.first().unwrap();
 
             match command {
-                ManageCommmand::Play => {
-                    cast_device
-                        .media
-                        .play(app.transport_id.as_str(), status.media_session_id)
-                        .unwrap();
-                }
+                ManageCommmand::Play => cast_device
+                    .media
+                    .play(app.transport_id.as_str(), status.media_session_id)
+                    .map(|_| {})
+                    .map_err(ChromecastError::RustCastError),
 
-                ManageCommmand::Pause => {
-                    cast_device
-                        .media
-                        .pause(app.transport_id.as_str(), status.media_session_id)
-                        .unwrap();
-                }
+                ManageCommmand::Pause => cast_device
+                    .media
+                    .pause(app.transport_id.as_str(), status.media_session_id)
+                    .map(|_| {})
+                    .map_err(ChromecastError::RustCastError),
 
-                ManageCommmand::Stop => {
-                    cast_device
-                        .media
-                        .stop(app.transport_id.as_str(), status.media_session_id)
-                        .unwrap();
-                }
+                ManageCommmand::Stop => cast_device
+                    .media
+                    .stop(app.transport_id.as_str(), status.media_session_id)
+                    .map(|_| {})
+                    .map_err(ChromecastError::RustCastError),
             }
         }
-        None => {
-            println!("manage: App not found");
-        }
+        None => Err(ChromecastError::AppNotFound),
     }
 }
 
-fn get_status(med: &MediaReceiver) -> Option<ChromecastStatus> {
-    let cast_device = match CastDevice::connect_without_host_verification(med.ip.as_str(), med.port)
-    {
-        Ok(cast_device) => cast_device,
-        Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
-    };
+fn get_status(med: &MediaReceiver) -> Result<ChromecastStatus, ChromecastError> {
+    let cast_device =
+        match CastDevice::connect_without_host_verification(med.ip.to_string(), med.port) {
+            Ok(cast_device) => cast_device,
+            Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
+        };
 
     // Connect and ping
-    cast_device.connection.connect(med.dest_id.as_str()).ok()?;
-    cast_device.heartbeat.ping().ok()?;
+    cast_device
+        .connection
+        .connect(med.dest_id.as_str())
+        .map_err(ChromecastError::RustCastError)?;
+    cast_device
+        .heartbeat
+        .ping()
+        .map_err(ChromecastError::RustCastError)?;
 
     // Manage app
     let app_to_manage = CastDeviceApp::DefaultMediaReceiver;
-    let status = cast_device.receiver.get_status().ok()?;
+    let status = cast_device
+        .receiver
+        .get_status()
+        .map_err(ChromecastError::RustCastError)?;
     let app = status
         .applications
         .iter()
@@ -181,50 +198,62 @@ fn get_status(med: &MediaReceiver) -> Option<ChromecastStatus> {
             cast_device
                 .connection
                 .connect(app.transport_id.as_str())
-                .ok()?;
+                .map_err(ChromecastError::RustCastError)?;
             let status = cast_device
                 .media
                 .get_status(app.transport_id.as_str(), None)
-                .ok()?
+                .map_err(ChromecastError::RustCastError)?
                 .entries
-                .pop()?;
-            Some(ChromecastStatus {
+                .pop()
+                .map_or_else(|| Err(ChromecastError::AppStatusNotFound), Ok)?;
+            Ok(ChromecastStatus {
                 current_time: status.current_time,
                 player_state: status.player_state,
                 idle_reason: status.idle_reason,
             })
         }
-        None => None,
+        None => Err(ChromecastError::AppNotFound),
     }
 }
 
-fn cast(med: &MediaReceiver, url: &str) {
-    let cast_device = match CastDevice::connect_without_host_verification(med.ip.as_str(), med.port)
-    {
-        Ok(cast_device) => cast_device,
-        Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
-    };
+fn cast(med: &MediaReceiver, url: &str) -> Result<(), ChromecastError> {
+    let cast_device =
+        match CastDevice::connect_without_host_verification(med.ip.to_string(), med.port) {
+            Ok(cast_device) => cast_device,
+            Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
+        };
 
+    // Connect and ping
     cast_device
         .connection
         .connect(med.dest_id.as_str())
-        .unwrap();
-    cast_device.heartbeat.ping().unwrap();
+        .map_err(ChromecastError::RustCastError)?;
+    cast_device
+        .heartbeat
+        .ping()
+        .map_err(ChromecastError::RustCastError)?;
 
     // Information about cast device.
-    let status = cast_device.receiver.get_status().unwrap();
+    let status = cast_device
+        .receiver
+        .get_status()
+        .map_err(ChromecastError::RustCastError)?;
     for i in 0..status.applications.len() {
         println!("{}", status.applications[i].display_name.as_str());
         println!("{}", status.applications[i].app_id.as_str());
         println!("{}", status.applications[i].status_text.as_str());
     }
 
+    // Launch the application
     let app_to_run = &CastDeviceApp::DefaultMediaReceiver;
-    let app = cast_device.receiver.launch_app(app_to_run).unwrap();
+    let app = cast_device
+        .receiver
+        .launch_app(app_to_run)
+        .map_err(ChromecastError::RustCastError)?;
     cast_device
         .connection
         .connect(app.transport_id.as_str())
-        .unwrap();
+        .map_err(ChromecastError::RustCastError)?;
 
     // Start casting, returns also a status
     cast_device
@@ -241,7 +270,7 @@ fn cast(med: &MediaReceiver, url: &str) {
                 metadata: None,
             },
         )
-        .unwrap();
+        .map_err(ChromecastError::RustCastError)?;
 
     // Keeps on casting until connection closes
     //
@@ -252,7 +281,10 @@ fn cast(med: &MediaReceiver, url: &str) {
                 println!("[Heartbeat] {:?}", response);
 
                 if let HeartbeatResponse::Ping = response {
-                    cast_device.heartbeat.pong().unwrap();
+                    cast_device
+                        .heartbeat
+                        .pong()
+                        .map_err(ChromecastError::RustCastError)?;
                 }
             }
             Ok(ChannelMessage::Connection(ConnectionResponse::Close)) => {
@@ -274,4 +306,5 @@ fn cast(med: &MediaReceiver, url: &str) {
         }
     }
     println!("Close thread!");
+    Ok(())
 }
