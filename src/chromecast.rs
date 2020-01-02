@@ -22,6 +22,12 @@ pub enum ChromecastError {
     RustCastError(Error),
 }
 
+impl From<rust_cast::errors::Error> for ChromecastError {
+    fn from(w: rust_cast::errors::Error) -> ChromecastError {
+        ChromecastError::RustCastError(w)
+    }
+}
+
 /*
 let rec = get_default_media_receiver("192.168.8.106")
 rec.cast("http://commondatastorage.googleapis.com/gtv-videos-bucket/big_buck_bunny_1080p.mp4").unwrap();
@@ -112,16 +118,9 @@ enum ManageCommmand {
 }
 
 fn manage(med: &MediaReceiver, command: ManageCommmand) -> Result<(), ChromecastError> {
-    let cast_device =
-        match CastDevice::connect_without_host_verification(med.ip.to_string(), med.port) {
-            Ok(cast_device) => cast_device,
-            Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
-        };
+    let cast_device = CastDevice::connect_without_host_verification(med.ip.to_string(), med.port)?;
 
-    cast_device
-        .connection
-        .connect(med.dest_id.as_str())
-        .unwrap();
+    cast_device.connection.connect(med.dest_id.as_str())?;
     cast_device.heartbeat.ping().unwrap();
     let app_to_manage = CastDeviceApp::DefaultMediaReceiver;
     let status = cast_device.receiver.get_status().unwrap();
@@ -166,28 +165,15 @@ fn manage(med: &MediaReceiver, command: ManageCommmand) -> Result<(), Chromecast
 }
 
 fn get_status(med: &MediaReceiver) -> Result<ChromecastStatus, ChromecastError> {
-    let cast_device =
-        match CastDevice::connect_without_host_verification(med.ip.to_string(), med.port) {
-            Ok(cast_device) => cast_device,
-            Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
-        };
+    let cast_device = CastDevice::connect_without_host_verification(med.ip.to_string(), med.port)?;
 
     // Connect and ping
-    cast_device
-        .connection
-        .connect(med.dest_id.as_str())
-        .map_err(ChromecastError::RustCastError)?;
-    cast_device
-        .heartbeat
-        .ping()
-        .map_err(ChromecastError::RustCastError)?;
+    cast_device.connection.connect(med.dest_id.as_str())?;
+    cast_device.heartbeat.ping()?;
 
     // Manage app
     let app_to_manage = CastDeviceApp::DefaultMediaReceiver;
-    let status = cast_device
-        .receiver
-        .get_status()
-        .map_err(ChromecastError::RustCastError)?;
+    let status = cast_device.receiver.get_status()?;
     let app = status
         .applications
         .iter()
@@ -195,14 +181,10 @@ fn get_status(med: &MediaReceiver) -> Result<ChromecastStatus, ChromecastError> 
 
     match app {
         Some(app) => {
-            cast_device
-                .connection
-                .connect(app.transport_id.as_str())
-                .map_err(ChromecastError::RustCastError)?;
+            cast_device.connection.connect(app.transport_id.as_str())?;
             let status = cast_device
                 .media
-                .get_status(app.transport_id.as_str(), None)
-                .map_err(ChromecastError::RustCastError)?
+                .get_status(app.transport_id.as_str(), None)?
                 .entries
                 .pop()
                 .map_or_else(|| Err(ChromecastError::AppStatusNotFound), Ok)?;
@@ -217,27 +199,14 @@ fn get_status(med: &MediaReceiver) -> Result<ChromecastStatus, ChromecastError> 
 }
 
 fn cast(med: &MediaReceiver, url: &str) -> Result<(), ChromecastError> {
-    let cast_device =
-        match CastDevice::connect_without_host_verification(med.ip.to_string(), med.port) {
-            Ok(cast_device) => cast_device,
-            Err(err) => panic!("Could not establish connection with Cast Device: {:?}", err),
-        };
+    let cast_device = CastDevice::connect_without_host_verification(med.ip.to_string(), med.port)?;
 
     // Connect and ping
-    cast_device
-        .connection
-        .connect(med.dest_id.as_str())
-        .map_err(ChromecastError::RustCastError)?;
-    cast_device
-        .heartbeat
-        .ping()
-        .map_err(ChromecastError::RustCastError)?;
+    cast_device.connection.connect(med.dest_id.as_str())?;
+    cast_device.heartbeat.ping()?;
 
     // Information about cast device.
-    let status = cast_device
-        .receiver
-        .get_status()
-        .map_err(ChromecastError::RustCastError)?;
+    let status = cast_device.receiver.get_status()?;
     for i in 0..status.applications.len() {
         println!("{}", status.applications[i].display_name.as_str());
         println!("{}", status.applications[i].app_id.as_str());
@@ -246,31 +215,22 @@ fn cast(med: &MediaReceiver, url: &str) -> Result<(), ChromecastError> {
 
     // Launch the application
     let app_to_run = &CastDeviceApp::DefaultMediaReceiver;
-    let app = cast_device
-        .receiver
-        .launch_app(app_to_run)
-        .map_err(ChromecastError::RustCastError)?;
-    cast_device
-        .connection
-        .connect(app.transport_id.as_str())
-        .map_err(ChromecastError::RustCastError)?;
+    let app = cast_device.receiver.launch_app(app_to_run)?;
+    cast_device.connection.connect(app.transport_id.as_str())?;
 
     // Start casting, returns also a status
-    cast_device
-        .media
-        .load(
-            app.transport_id.as_str(),
-            app.session_id.as_str(),
-            &Media {
-                // http://commondatastorage.googleapis.com/gtv-videos-bucket/big_buck_bunny_1080p.mp4
-                content_id: url.into(),
-                content_type: "".into(),
-                stream_type: StreamType::Live, // "buffered"
-                duration: None,
-                metadata: None,
-            },
-        )
-        .map_err(ChromecastError::RustCastError)?;
+    cast_device.media.load(
+        app.transport_id.as_str(),
+        app.session_id.as_str(),
+        &Media {
+            // http://commondatastorage.googleapis.com/gtv-videos-bucket/big_buck_bunny_1080p.mp4
+            content_id: url.into(),
+            content_type: "".into(),
+            stream_type: StreamType::Live, // "buffered"
+            duration: None,
+            metadata: None,
+        },
+    )?;
 
     // Keeps on casting until connection closes
     //
@@ -281,10 +241,7 @@ fn cast(med: &MediaReceiver, url: &str) -> Result<(), ChromecastError> {
                 println!("[Heartbeat] {:?}", response);
 
                 if let HeartbeatResponse::Ping = response {
-                    cast_device
-                        .heartbeat
-                        .pong()
-                        .map_err(ChromecastError::RustCastError)?;
+                    cast_device.heartbeat.pong()?;
                 }
             }
             Ok(ChannelMessage::Connection(ConnectionResponse::Close)) => {

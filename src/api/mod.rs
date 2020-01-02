@@ -29,6 +29,18 @@ enum ApiError {
     // HyperError(hyper::error::Error),
 }
 
+impl From<chromecast::ChromecastError> for ApiError {
+    fn from(w: chromecast::ChromecastError) -> ApiError {
+        ApiError::ChromecastError(w)
+    }
+}
+
+impl From<serde_json::error::Error> for ApiError {
+    fn from(w: serde_json::error::Error) -> ApiError {
+        ApiError::JsonError(w)
+    }
+}
+
 #[derive(Serialize)]
 struct ApiJsonError {
     error: String,
@@ -118,7 +130,7 @@ async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>,
     let method = req.method().clone();
     let uri = req.uri().clone();
     let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-    let value = serde_json::from_slice::<ChromecastRequest>(&body).map_err(ApiError::JsonError)?;
+    let value = serde_json::from_slice::<ChromecastRequest>(&body)?;
 
     println!("value {:?}", value);
 
@@ -128,6 +140,7 @@ async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>,
     match (method, uri.path().trim_start_matches("/chromecast")) {
         (Method::POST, "/start") => {
             tokio::spawn(async move {
+                // TODO: Handle panics! Send through the channel in AppState
                 receiver
                     .cast("http://192.168.8.103:3000/file/encode")
                     .unwrap();
@@ -136,17 +149,17 @@ async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>,
         }
 
         (Method::POST, "/pause") => {
-            receiver.pause().map_err(ApiError::ChromecastError)?;
+            receiver.pause()?;
             *response.status_mut() = StatusCode::OK;
         }
 
         (Method::POST, "/play") => {
-            receiver.play().map_err(ApiError::ChromecastError)?;
+            receiver.play()?;
             *response.status_mut() = StatusCode::OK;
         }
 
         (Method::POST, "/stop") => {
-            receiver.stop().map_err(ApiError::ChromecastError)?;
+            receiver.stop()?;
             *response.status_mut() = StatusCode::OK;
         }
 
