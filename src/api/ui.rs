@@ -8,22 +8,54 @@ use bytes::BytesMut;
 use futures::Stream;
 use futures_util::TryStreamExt;
 use hyper::header::HeaderValue;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
+use crate::api::ApiError;
 use crate::media;
 use crate::msg;
 
-pub async fn get_media_files(state: Arc<AppState>) -> ApiResponse<()> {
-    media::scan_media_files(&state.opts.dir, &state.opts.media_exts);
-    Ok(())
+#[derive(Serialize)]
+pub struct MediaFilesResult {
+    files: Vec<String>,
 }
 
-pub async fn media_show(state: Arc<AppState>) -> ApiResponse<Response<Body>> {
+pub async fn get_media_files(state: Arc<AppState>) -> ApiResponse<MediaFilesResult> {
+    let files: Vec<String> = media::scan_media_files(&state.opts.dir, &state.opts.media_exts)
+        .iter()
+        .filter_map(|v: &PathBuf| v.to_str())
+        .map(|v| v.to_string())
+        .collect();
+    Ok(MediaFilesResult { files })
+}
+
+#[derive(Deserialize)]
+pub struct MediaShowRequest {
+    pub file: String,
+    pub try_use_subtitles: bool,
+}
+
+pub async fn media_show(
+    state: Arc<AppState>,
+    request: MediaShowRequest,
+) -> ApiResponse<Response<Body>> {
+    let file = request.file;
+    // println!(
+    //     "Validate file {} {:?} {:?} {:?}",
+    //     file,
+    //     &state.opts.dir,
+    //     &state.opts.media_exts,
+    //     std::fs::canonicalize(&file).map(|v| v.to_string_lossy().into_owned())
+    // );
+    if !media::is_valid_media_file(&file, &state.opts.dir, &state.opts.media_exts) {
+        return Err(ApiError::InvalidMediaFile(file));
+    }
     state
         .notifier
         .send(msg::NotifyMessage::EncodingStarted)
         .unwrap();
-    let stream = media::encode("\\\\192.168.8.150\\Downloads\\Big.Buck.Bunny\\big_buck_bunny.mp4");
+    let stream = media::encode(file);
     let mut response = Response::new(Body::wrap_stream(stream));
     response
         .headers_mut()

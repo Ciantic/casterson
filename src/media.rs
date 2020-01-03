@@ -3,6 +3,8 @@ use futures::Stream;
 use futures_util::TryStreamExt;
 use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::fs::canonicalize;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
@@ -20,12 +22,32 @@ pub fn scan_media_files<S: AsRef<OsStr>>(dirs: &[PathBuf], exts: &[S]) -> Vec<Pa
                 .extension()
                 .map_or(OsString::from(""), OsStr::to_os_string);
             if exts_os.contains(&ext) {
-                println!("FOUND IT!");
                 paths.push(path);
             }
         }
     }
     paths
+}
+
+/// Validates media file
+///
+/// File is valid if it's inside one of the safe directories, and it's
+/// extensions is one of the safe ones.
+///
+/// Safe directory listing should be in canonicalized form
+pub fn is_valid_media_file<S: AsRef<Path>>(file: S, dirs: &[PathBuf], exts: &Vec<String>) -> bool {
+    canonicalize(&file)
+        .map(|file_path| {
+            let safe_ext = file_path
+                .extension()
+                .map(|ext| exts.contains(&ext.to_string_lossy().into_owned()))
+                .unwrap_or(false);
+
+            let safe_dir = dirs.iter().any(|d| file_path.starts_with(d));
+
+            safe_ext && safe_dir
+        })
+        .unwrap_or(false)
 }
 
 /// Returns video stream as bytes or io::Error

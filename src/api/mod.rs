@@ -2,6 +2,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::Method;
 use hyper::{Body, Request, Response, Server};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -11,10 +12,12 @@ pub mod ui;
 
 use crate::chromecast as chromecast_main;
 use crate::AppState;
+use ui::MediaShowRequest;
 
 #[derive(Debug)]
 pub enum ApiError {
     NotFound,
+    InvalidMediaFile(String),
     ChromecastError(chromecast_main::ChromecastError),
     JsonError(serde_json::error::Error),
     // HyperError(hyper::error::Error),
@@ -48,6 +51,16 @@ impl Into<ApiJsonError> for ApiError {
             ApiError::JsonError(err) => ApiJsonError {
                 error: "JSON_ERROR".into(),
                 msg: err.to_string(),
+            },
+
+            ApiError::InvalidMediaFile(file) => ApiJsonError {
+                error: "INVALID_MEDIA_FILE".into(),
+                msg: file,
+            },
+
+            ApiError::NotFound => ApiJsonError {
+                error: "NOT_FOUND".into(),
+                msg: "404 Not found".into(),
             },
 
             _ => ApiJsonError {
@@ -156,11 +169,35 @@ async fn handle_chromecast_request(
 
 async fn handle_other_request(
     state: Arc<AppState>,
-    req: Request<Body>,
+    request: Request<Body>,
 ) -> Result<Response<Body>, ApiError> {
-    match (req.method(), req.uri().path()) {
+    let params: HashMap<String, String> = request
+        .uri()
+        .query()
+        .map(|v| {
+            url::form_urlencoded::parse(v.as_bytes())
+                .into_owned()
+                .map(|(k, v): (String, String)| (k, v))
+                .collect()
+        })
+        .unwrap_or_else(HashMap::new);
+
+    match (request.method(), request.uri().path()) {
         (&Method::GET, "/get_media_files") => to_response(ui::get_media_files(state).await),
-        (&Method::GET, "/media_show") => ui::media_show(state).await,
+        (&Method::GET, "/media_show") => {
+            if let Some(file) = params.get("file") {
+                ui::media_show(
+                    state,
+                    MediaShowRequest {
+                        file: file.into(),
+                        try_use_subtitles: false,
+                    },
+                )
+                .await
+            } else {
+                Err(ApiError::NotFound)
+            }
+        }
         _ => Err(ApiError::NotFound),
     }
 }
