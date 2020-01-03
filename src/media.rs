@@ -1,10 +1,15 @@
+use bytes::BytesMut;
+use futures::Stream;
+use futures_util::TryStreamExt;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
+use tokio_util::codec::{BytesCodec, FramedRead};
 use walkdir;
 
+/// Scan media files
 pub fn scan_media_files<S: AsRef<OsStr>>(dirs: &[PathBuf], exts: &[S]) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = vec![];
     let exts_os: Vec<OsString> = exts.iter().map(OsString::from).collect();
@@ -23,7 +28,10 @@ pub fn scan_media_files<S: AsRef<OsStr>>(dirs: &[PathBuf], exts: &[S]) -> Vec<Pa
     paths
 }
 
-pub fn encode<S: AsRef<OsStr>>(file: S) -> tokio::process::ChildStdout {
+/// Returns video stream as bytes or io::Error
+pub fn encode<S: AsRef<OsStr>>(
+    file: S,
+) -> impl Stream<Item = Result<bytes::Bytes, std::io::Error>> {
     let mut cmd = Command::new("ffmpeg");
     #[rustfmt::skip]
     cmd
@@ -36,8 +44,9 @@ pub fn encode<S: AsRef<OsStr>>(file: S) -> tokio::process::ChildStdout {
         .arg("-movflags").arg("frag_keyframe+empty_moov")
         .arg("-f").arg("mp4")
         .arg("pipe:1")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdout(Stdio::piped()) // redirect the stdout
+        .stderr(Stdio::piped()); // redirect the stderr (suppressed)
     let mut child = cmd.spawn().expect("panic! failed to spawn");
-    child.stdout().take().expect("panic! stdout failed!")
+    let stdout = child.stdout().take().expect("panic! stdout failed!");
+    FramedRead::new(stdout, BytesCodec::new()).map_ok(BytesMut::freeze)
 }

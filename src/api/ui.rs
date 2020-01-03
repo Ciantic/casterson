@@ -23,10 +23,8 @@ pub async fn media_show(state: Arc<AppState>) -> ApiResponse<Response<Body>> {
         .notifier
         .send(msg::NotifyMessage::EncodingStarted)
         .unwrap();
-    let stdout = media::encode("\\\\192.168.8.150\\Downloads\\Big.Buck.Bunny\\big_buck_bunny.mp4");
-    let st = FramedRead::new(stdout, BytesCodec::new()).map_ok(BytesMut::freeze);
-    let s = Body::wrap_stream(st);
-    let mut response = Response::new(s);
+    let stream = media::encode("\\\\192.168.8.150\\Downloads\\Big.Buck.Bunny\\big_buck_bunny.mp4");
+    let mut response = Response::new(Body::wrap_stream(stream));
     response
         .headers_mut()
         .insert("Content-Type", HeaderValue::from_static("video/mp4"));
