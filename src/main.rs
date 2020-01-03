@@ -38,6 +38,7 @@ pub struct CliOpts {
     dir: Vec<PathBuf>,
 }
 
+#[derive(Debug)]
 pub struct AppState {
     pub opts: CliOpts,
     pub notifier: Sender<msg::NotifyMessage>,
@@ -59,6 +60,9 @@ async fn main() {
             match value {
                 msg::NotifyMessage::EncodingStarted => {
                     println!("Encoding börjat");
+                }
+                msg::NotifyMessage::ErrorDuringCasting(err) => {
+                    println!("Error during casting {:?}", err);
                 }
                 msg::NotifyMessage::RequestClosed => println!("Request closed"),
             }

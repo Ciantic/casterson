@@ -1,36 +1,27 @@
-use bytes::BytesMut;
-use serde::Serializer;
-use std::net::IpAddr;
-
-use futures_util::TryFutureExt;
-use futures_util::TryStreamExt;
-use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
+use hyper::Method;
 use hyper::{Body, Request, Response, Server};
-use hyper::{Method, StatusCode};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::fs::File;
-use tokio_util::codec::{BytesCodec, FramedRead};
 
-use crate::chromecast;
-use crate::chromecast::BaseMediaReceiver;
-use crate::media;
-use crate::msg;
+pub mod chromecast;
+pub mod ui;
+
+use crate::chromecast as chromecast_main;
 use crate::AppState;
 
 #[derive(Debug)]
-enum ApiError {
+pub enum ApiError {
     NotFound,
-    ChromecastError(chromecast::ChromecastError),
+    ChromecastError(chromecast_main::ChromecastError),
     JsonError(serde_json::error::Error),
     // HyperError(hyper::error::Error),
 }
 
-impl From<chromecast::ChromecastError> for ApiError {
-    fn from(w: chromecast::ChromecastError) -> ApiError {
+impl From<chromecast_main::ChromecastError> for ApiError {
+    fn from(w: chromecast_main::ChromecastError) -> ApiError {
         ApiError::ChromecastError(w)
     }
 }
@@ -67,10 +58,36 @@ impl Into<ApiJsonError> for ApiError {
     }
 }
 
-type ApiResponse<S>
+// pub struct ApiResponse<T>(Result<T, ApiError>)
+// where
+//     T: Serialize;
+
+// impl<T> From<Result<Response<Body>, ApiError>> for ApiResponse<T>
+// where
+//     T: Serialize,
+// {
+//     fn from(err: Result<Response<Body>, ApiError>) -> Self {
+//         unimplemented!()
+//     }
+// }
+
+pub type ApiResponse<S> = Result<S, ApiError>;
+
+fn to_response<T>(resp: ApiResponse<T>) -> Result<Response<Body>, ApiError>
 where
-    S: Serializer,
-= Result<S, ApiError>;
+    T: Serialize,
+{
+    resp.map(|v| {
+        let json = serde_json::to_string(&v).unwrap();
+        Response::new(Body::from(json))
+    })
+    // .map_err(|e| {
+    //     let json_err: ApiJsonError = e.into();
+    //     let json = serde_json::to_string(&json_err).unwrap();
+    //     Response::new(Body::from(json))
+    // })
+    // .unwrap_or_else(|e| e)
+}
 
 /// Create hyper server
 pub async fn create_server(state: Arc<AppState>) {
@@ -84,7 +101,7 @@ pub async fn create_server(state: Arc<AppState>) {
             // Creates a "Service" from asyncfunction
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
                 let state_req = Arc::clone(&state_con);
-                async move { handle_request(&*state_req, req).await }
+                async move { handle_request(state_req, req).await }
             }))
         }
     });
@@ -95,17 +112,13 @@ pub async fn create_server(state: Arc<AppState>) {
     println!("Server closed");
 }
 
-async fn handle_request2(state: &AppState) -> ApiResponse<()> {
-    unimplemented!()
-}
-
 async fn handle_request(
-    state: &AppState,
+    state: Arc<AppState>,
     req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
     let resp = {
         if req.uri().path().starts_with("/chromecast") {
-            handle_chromecast_request(req).await
+            handle_chromecast_request(state, req).await
         } else {
             handle_other_request(state, req).await
         }
@@ -119,111 +132,35 @@ async fn handle_request(
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct ChromecastRequest {
-    ip: IpAddr,
-    port: Option<u16>,
-    dest_id: Option<String>,
-}
-
-async fn handle_chromecast_request(req: Request<Body>) -> Result<Response<Body>, ApiError> {
-    let method = req.method().clone();
+async fn handle_chromecast_request(
+    state: Arc<AppState>,
+    req: Request<Body>,
+) -> Result<Response<Body>, ApiError> {
+    if req.method() != Method::POST {
+        return Err(ApiError::NotFound);
+    }
     let uri = req.uri().clone();
     let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-    let value = serde_json::from_slice::<ChromecastRequest>(&body)?;
+    let request: chromecast::ChromecastRequest = serde_json::from_slice(&body)?;
+    let api = chromecast::ChromecastApi { state, request };
 
-    println!("value {:?}", value);
-
-    let receiver = chromecast::get_default_media_receiver(&value.ip, value.port, value.dest_id);
-    let mut response = Response::new(Body::empty());
-
-    match (method, uri.path().trim_start_matches("/chromecast")) {
-        (Method::POST, "/start") => {
-            tokio::spawn(async move {
-                // TODO: Handle panics! Send through the channel in AppState
-                receiver
-                    .cast("http://192.168.8.103:3000/file/encode")
-                    .unwrap();
-            });
-            *response.status_mut() = StatusCode::OK;
-        }
-
-        (Method::POST, "/pause") => {
-            receiver.pause()?;
-            *response.status_mut() = StatusCode::OK;
-        }
-
-        (Method::POST, "/play") => {
-            receiver.play()?;
-            *response.status_mut() = StatusCode::OK;
-        }
-
-        (Method::POST, "/stop") => {
-            receiver.stop()?;
-            *response.status_mut() = StatusCode::OK;
-        }
-
-        (Method::POST, "/status") => {
-            let status = receiver.get_status().unwrap();
-            let json = serde_json::to_string(&status).unwrap();
-            response = Response::new(Body::from(json));
-            *response.status_mut() = StatusCode::OK;
-        }
-
-        // 404 not found
-        _ => {
-            *response.status_mut() = StatusCode::NOT_FOUND;
-        }
-    };
-    Ok(response)
+    match uri.path() {
+        "/chromecast/cast" => to_response(api.cast().await),
+        "/chromecast/pause" => to_response(api.pause().await),
+        "/chromecast/play" => to_response(api.play().await),
+        "/chromecast/stop" => to_response(api.stop().await),
+        "/chromecast/status" => to_response(api.status().await),
+        _ => Err(ApiError::NotFound),
+    }
 }
 
 async fn handle_other_request(
-    state: &AppState,
+    state: Arc<AppState>,
     req: Request<Body>,
 ) -> Result<Response<Body>, ApiError> {
-    let mut response = Response::new(Body::empty());
-
-    // let query = req.uri().query();
-    // let parsedUri = Url::parse(&req.uri().to_string()).unwrap();
-    // let params: HashMap<_, _> = parsedUri.query_pairs().into_owned().collect();
-
     match (req.method(), req.uri().path()) {
-        (&Method::GET, "/media_files") => {
-            let media_files = media::scan_media_files(&state.opts.dir, &state.opts.media_exts);
-        }
-
-        // Stream a file from a disk
-        (&Method::GET, "/file") => {
-            // let file =
-            let stream = File::open("C:\\Source\\Backup_Ignore.txt")
-                .map_ok(|file| FramedRead::new(file, BytesCodec::new()).map_ok(BytesMut::freeze))
-                .try_flatten_stream();
-            response = Response::new(Body::wrap_stream(stream));
-        }
-
-        (&Method::GET, "/file/encode") => {
-            state
-                .notifier
-                .send(msg::NotifyMessage::EncodingStarted)
-                .unwrap();
-            let stdout =
-                media::encode("\\\\192.168.8.150\\Downloads\\Big.Buck.Bunny\\big_buck_bunny.mp4");
-            let st = FramedRead::new(stdout, BytesCodec::new()).map_ok(BytesMut::freeze);
-            let s = Body::wrap_stream(st);
-            response = Response::new(s);
-            response
-                .headers_mut()
-                .insert("Content-Type", HeaderValue::from_static("video/mp4"));
-            response
-                .headers_mut()
-                .insert("Cache-Control", HeaderValue::from_static("no-cache"));
-        }
-
-        // 404 not found
-        _ => {
-            *response.status_mut() = StatusCode::NOT_FOUND;
-        }
+        (&Method::GET, "/get_media_files") => to_response(ui::get_media_files(state).await),
+        (&Method::GET, "/media_show") => ui::media_show(state).await,
+        _ => Err(ApiError::NotFound),
     }
-    Ok(response)
 }
