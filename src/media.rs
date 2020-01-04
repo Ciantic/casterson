@@ -1,6 +1,7 @@
 use bytes::BytesMut;
 use futures::Stream;
 use futures_util::TryStreamExt;
+use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::canonicalize;
@@ -50,15 +51,72 @@ pub fn is_valid_media_file<S: AsRef<Path>>(file: S, dirs: &[PathBuf], exts: &Vec
         .unwrap_or(false)
 }
 
+#[derive(Default, Serialize, Deserialize)]
+pub struct EncodeVideoOpts {
+    pub seek_seconds: i32,
+    pub use_subtitles: bool,
+    pub tv_resolution: Option<(i32, i32)>,
+    pub crop_percent: i32,
+}
+
 /// Returns video stream as bytes or io::Error
-pub fn encode<S: AsRef<OsStr>>(
-    file: S,
+pub fn encode<P: AsRef<Path>>(
+    file: P,
+    opts: EncodeVideoOpts,
 ) -> impl Stream<Item = Result<bytes::Bytes, std::io::Error>> {
+    let file_ = file.as_ref();
+    let mut video_filters: Vec<String> = vec![];
+    let subtitle_file = file_.with_extension("srt");
+
+    println!("subtitle file {}", subtitle_file.to_string_lossy());
+    if opts.use_subtitles && subtitle_file.exists() {
+        let ffmpeg_subtitle_filename = subtitle_file
+            .to_string_lossy()
+            .replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace(":", "\\:");
+
+        // Subtitle alignment
+        //
+        // Values may be 1=Left, 2=Centered, 3=Right. Add 4 to the value for a
+        // "Toptitle". Add 8 to the value for a "Midtitle". eg. 5 =
+        // left-justified toptitle
+        let subtitle_alignment = 1;
+
+        let subtitle_margin_left = 50;
+        let subtitle_margin_right = 50;
+        let subtitle_margin_vertical = 30;
+        let subtitle_encoding = "UTF-8";
+
+        let ffmpeg_subtitle_filter = format!("subtitles='{subtitle_filename}':charenc='{subtitle_encoding}':force_style='FontName='Arial',Fontsize=32,Outline=2,MarginL={subtitle_margin_left},MarginR={subtitle_margin_right},MarginV={subtitle_margin_vertical},Alignment={subtitle_alignment}'", 
+                subtitle_filename = ffmpeg_subtitle_filename,
+                subtitle_encoding = subtitle_encoding,
+            subtitle_margin_left = subtitle_margin_left,
+            subtitle_margin_right = subtitle_margin_right,
+            subtitle_margin_vertical = subtitle_margin_vertical,
+            subtitle_alignment = subtitle_alignment);
+
+        video_filters.push(format!("setpts=PTS+{}/TB", opts.seek_seconds));
+        video_filters.push(ffmpeg_subtitle_filter);
+        video_filters.push("setpts=PTS-STARTPTS".into());
+    }
+
+    let video_filters_arg: Vec<String> = {
+        let vfs = video_filters.join(",");
+        if vfs != "" {
+            vec!["-vf".into(), vfs]
+        } else {
+            vec![]
+        }
+    };
+
     let mut cmd = Command::new("ffmpeg");
     #[rustfmt::skip]
     cmd
+        .arg("-ss").arg(opts.seek_seconds.to_string())
         .arg("-hwaccel").arg("dxva2")
-        .arg("-i").arg(file)
+        .arg("-i").arg(file_.as_os_str())
+        .args(video_filters_arg)
         .arg("-acodec").arg("aac")
         .arg("-c:v").arg("h264_nvenc")
         .arg("-preset").arg("slow")

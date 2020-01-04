@@ -185,18 +185,28 @@ async fn handle_other_request(
     match (request.method(), request.uri().path()) {
         (&Method::GET, "/get_media_files") => to_response(ui::get_media_files(state).await),
         (&Method::GET, "/media_show") => {
-            if let Some(file) = params.get("file") {
-                ui::media_show(
-                    state,
-                    MediaShowRequest {
-                        file: file.into(),
-                        try_use_subtitles: false,
-                    },
-                )
-                .await
-            } else {
-                Err(ApiError::NotFound)
-            }
+            // Use subtitles by default true
+            let use_subtitles = params.get("use_subtitles").map_or(true, |v| v == "1");
+
+            // Seek seconds (integer for now)
+            let seek_seconds: i32 = params
+                .get("seek_seconds")
+                .map_or(0, |v| v.parse().unwrap_or(0));
+
+            // Get file from query string
+            let file = params
+                .get("file")
+                .map_or(Err(ApiError::NotFound), |v| Ok(v.clone()))?;
+
+            ui::media_show(
+                state,
+                MediaShowRequest {
+                    file,
+                    use_subtitles,
+                    seek_seconds,
+                },
+            )
+            .await
         }
         _ => Err(ApiError::NotFound),
     }

@@ -4,13 +4,9 @@ use hyper::Response;
 use std::sync::Arc;
 
 use crate::api::ApiResponse;
-use bytes::BytesMut;
-use futures::Stream;
-use futures_util::TryStreamExt;
 use hyper::header::HeaderValue;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tokio_util::codec::{BytesCodec, FramedRead};
 
 use crate::api::ApiError;
 use crate::media;
@@ -33,7 +29,8 @@ pub async fn get_media_files(state: Arc<AppState>) -> ApiResponse<MediaFilesResu
 #[derive(Deserialize)]
 pub struct MediaShowRequest {
     pub file: String,
-    pub try_use_subtitles: bool,
+    pub seek_seconds: i32,
+    pub use_subtitles: bool,
 }
 
 pub async fn media_show(
@@ -41,6 +38,8 @@ pub async fn media_show(
     request: MediaShowRequest,
 ) -> ApiResponse<Response<Body>> {
     let file = request.file;
+    let mut opts = media::EncodeVideoOpts::default();
+    opts.use_subtitles = request.use_subtitles;
     // println!(
     //     "Validate file {} {:?} {:?} {:?}",
     //     file,
@@ -55,8 +54,10 @@ pub async fn media_show(
         .notifier
         .send(msg::NotifyMessage::EncodingStarted)
         .unwrap();
-    let stream = media::encode(file);
+    let stream = media::encode(file, opts);
     let mut response = Response::new(Body::wrap_stream(stream));
+
+    // Headers
     response
         .headers_mut()
         .insert("Content-Type", HeaderValue::from_static("video/mp4"));
