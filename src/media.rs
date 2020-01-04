@@ -54,16 +54,6 @@ pub fn is_safe_file<P: AsRef<Path>, D: AsRef<Path>, E: AsRef<OsStr>>(
         .unwrap_or(false)
 }
 
-// pub fn example_usage() -> bool {
-//     let safe_paths: Vec<PathBuf> = vec![r"\\?\C:\Temp".into()];
-//     let safe_exts: Vec<String> = vec![r"txt".into(), "jpg".into()];
-//     is_safe_file(
-//         r"\\?\UNC\123.123.123.123\UnsafeFile",
-//         &safe_paths,
-//         &safe_exts,
-//     )
-// }
-
 #[derive(Default, Serialize, Deserialize)]
 pub struct EncodeVideoOpts {
     pub seek_seconds: i32,
