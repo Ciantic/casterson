@@ -48,7 +48,7 @@ pub async fn media_show(
     //     &state.opts.media_exts,
     //     std::fs::canonicalize(&file).map(|v| v.to_string_lossy().into_owned())
     // );
-    if !media::is_valid_media_file(&file, &state.opts.dir, &state.opts.media_exts) {
+    if !media::is_safe_file(&file, &state.opts.dir, &state.opts.media_exts) {
         return Err(ApiError::InvalidMediaFile(file));
     }
     state

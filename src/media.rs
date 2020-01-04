@@ -30,31 +30,31 @@ pub fn scan_media_files<E: AsRef<OsStr>, P: AsRef<Path>>(dirs: &[P], exts: &[E])
     paths
 }
 
-/// Validates media file
+/// Validates file against safe paths and extensions
 ///
 /// File is valid if it's inside one of the safe directories, and it's
 /// extensions is one of the safe ones.
 ///
-/// Safe directory listing should be in canonicalized form
-pub fn is_valid_media_file<P: AsRef<Path>, D: AsRef<Path>, E: AsRef<OsStr>>(
+/// Safe directory listing should be given in canonicalized form.
+pub fn is_safe_file<P: AsRef<Path>, D: AsRef<Path>, E: AsRef<OsStr>>(
     file: P,
-    dirs: &[D],
-    exts: &[E],
+    safe_dirs: &[D],
+    safe_exts: &[E],
 ) -> bool
 where
     E: Into<OsString>,
 {
     // I bet there is a better way than recreating the collection?
-    let exts_as_ostrings: Vec<OsString> = exts.iter().map(|v| v.into()).collect();
+    let safe_exts_ostrings: Vec<OsString> = safe_exts.iter().map(Into::into).collect();
 
     canonicalize(&file)
         .map(|file_path| {
             let safe_ext = file_path
                 .extension()
-                .map(|ext| exts_as_ostrings.contains(&ext.to_os_string()))
+                .map(|ext| safe_exts_ostrings.contains(&ext.to_os_string()))
                 .unwrap_or(false);
 
-            let safe_dir = dirs.iter().any(|d| file_path.starts_with(d));
+            let safe_dir = safe_dirs.iter().any(|d| file_path.starts_with(d));
 
             safe_ext && safe_dir
         })
