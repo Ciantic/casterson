@@ -20,6 +20,7 @@ pub enum ApiError {
     InvalidMediaFile(String),
     ChromecastError(chromecast_main::ChromecastError),
     JsonError(serde_json::error::Error),
+    IoError(std::io::Error),
     // HyperError(hyper::error::Error),
 }
 
@@ -32,6 +33,12 @@ impl From<chromecast_main::ChromecastError> for ApiError {
 impl From<serde_json::error::Error> for ApiError {
     fn from(w: serde_json::error::Error) -> ApiError {
         ApiError::JsonError(w)
+    }
+}
+
+impl From<std::io::Error> for ApiError {
+    fn from(w: std::io::Error) -> ApiError {
+        ApiError::IoError(w)
     }
 }
 

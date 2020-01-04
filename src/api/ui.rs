@@ -41,6 +41,8 @@ pub async fn media_show(
     let mut opts = media::EncodeVideoOpts::default();
     opts.use_subtitles = request.use_subtitles;
     opts.seek_seconds = request.seek_seconds;
+    opts.tv_resolution = Some((1280, 720));
+    opts.crop_percent = 15;
     // println!(
     //     "Validate file {} {:?} {:?} {:?}",
     //     file,
@@ -55,7 +57,7 @@ pub async fn media_show(
         .notifier
         .send(msg::NotifyMessage::EncodingStarted)
         .unwrap();
-    let stream = media::encode(file, opts);
+    let stream = media::encode(file, opts).await?;
     let mut response = Response::new(Body::wrap_stream(stream));
 
     // Headers
