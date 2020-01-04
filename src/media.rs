@@ -91,10 +91,10 @@ pub fn encode<P: AsRef<Path>>(
         let ffmpeg_subtitle_filter = format!("subtitles='{subtitle_filename}':charenc='{subtitle_encoding}':force_style='FontName='Arial',Fontsize=32,Outline=2,MarginL={subtitle_margin_left},MarginR={subtitle_margin_right},MarginV={subtitle_margin_vertical},Alignment={subtitle_alignment}'", 
                 subtitle_filename = ffmpeg_subtitle_filename,
                 subtitle_encoding = subtitle_encoding,
-            subtitle_margin_left = subtitle_margin_left,
-            subtitle_margin_right = subtitle_margin_right,
-            subtitle_margin_vertical = subtitle_margin_vertical,
-            subtitle_alignment = subtitle_alignment);
+                subtitle_margin_left = subtitle_margin_left,
+                subtitle_margin_right = subtitle_margin_right,
+                subtitle_margin_vertical = subtitle_margin_vertical,
+                subtitle_alignment = subtitle_alignment);
 
         video_filters.push(format!("setpts=PTS+{}/TB", opts.seek_seconds));
         video_filters.push(ffmpeg_subtitle_filter);
