@@ -13,7 +13,7 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 use walkdir;
 
 /// Scan media files
-pub fn scan_media_files<S: AsRef<OsStr>>(dirs: &[PathBuf], exts: &[S]) -> Vec<PathBuf> {
+pub fn scan_media_files<E: AsRef<OsStr>, P: AsRef<Path>>(dirs: &[P], exts: &[E]) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = vec![];
     let exts_os: Vec<OsString> = exts.iter().map(OsString::from).collect();
     for dir in dirs {
@@ -36,12 +36,22 @@ pub fn scan_media_files<S: AsRef<OsStr>>(dirs: &[PathBuf], exts: &[S]) -> Vec<Pa
 /// extensions is one of the safe ones.
 ///
 /// Safe directory listing should be in canonicalized form
-pub fn is_valid_media_file<S: AsRef<Path>>(file: S, dirs: &[PathBuf], exts: &Vec<String>) -> bool {
+pub fn is_valid_media_file<P: AsRef<Path>, D: AsRef<Path>, E: AsRef<OsStr>>(
+    file: P,
+    dirs: &[D],
+    exts: &[E],
+) -> bool
+where
+    E: Into<OsString>,
+{
+    // I bet there is a better way than recreating the collection?
+    let exts_as_ostrings: Vec<OsString> = exts.iter().map(|v| v.into()).collect();
+
     canonicalize(&file)
         .map(|file_path| {
             let safe_ext = file_path
                 .extension()
-                .map(|ext| exts.contains(&ext.to_string_lossy().into_owned()))
+                .map(|ext| exts_as_ostrings.contains(&ext.to_os_string()))
                 .unwrap_or(false);
 
             let safe_dir = dirs.iter().any(|d| file_path.starts_with(d));

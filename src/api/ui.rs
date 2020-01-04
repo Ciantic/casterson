@@ -40,6 +40,7 @@ pub async fn media_show(
     let file = request.file;
     let mut opts = media::EncodeVideoOpts::default();
     opts.use_subtitles = request.use_subtitles;
+    opts.seek_seconds = request.seek_seconds;
     // println!(
     //     "Validate file {} {:?} {:?} {:?}",
     //     file,
