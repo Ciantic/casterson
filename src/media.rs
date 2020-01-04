@@ -40,18 +40,20 @@ pub fn is_safe_file<P: AsRef<Path>, D: AsRef<Path>, E: AsRef<OsStr>>(
     file: P,
     safe_dirs: &[D],
     safe_exts: &[E],
-) -> bool
-where
-    E: Into<OsString>,
-{
-    // I bet there is a better way than recreating the collection?
-    let safe_exts_ostrings: Vec<OsString> = safe_exts.iter().map(Into::into).collect();
-
+) -> bool {
     canonicalize(&file)
         .map(|file_path| {
             let safe_ext = file_path
                 .extension()
-                .map(|ext| safe_exts_ostrings.contains(&ext.to_os_string()))
+                .map(|ext| {
+                    // This looks a bit rough, I wonder if there is better way?
+                    //
+                    // .contains() does not work because of generics.
+                    safe_exts.iter().any(|v| {
+                        let o: OsString = v.into();
+                        o == ext
+                    })
+                })
                 .unwrap_or(false);
 
             let safe_dir = safe_dirs.iter().any(|d| file_path.starts_with(d));
@@ -60,6 +62,16 @@ where
         })
         .unwrap_or(false)
 }
+
+// pub fn example_usage() -> bool {
+//     let safe_paths: Vec<PathBuf> = vec![r"\\?\C:\Temp".into()];
+//     let safe_exts: Vec<String> = vec![r"txt".into(), "jpg".into()];
+//     is_safe_file(
+//         r"\\?\UNC\123.123.123.123\UnsafeFile",
+//         &safe_paths,
+//         &safe_exts,
+//     )
+// }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct EncodeVideoOpts {
