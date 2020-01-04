@@ -43,18 +43,9 @@ pub fn is_safe_file<P: AsRef<Path>, D: AsRef<Path>, E: AsRef<OsStr>>(
 ) -> bool {
     canonicalize(&file)
         .map(|file_path| {
-            let safe_ext = file_path
-                .extension()
-                .map(|ext| {
-                    // This looks a bit rough, I wonder if there is better way?
-                    //
-                    // .contains() does not work because of generics.
-                    safe_exts.iter().any(|v| {
-                        let o: OsString = v.into();
-                        o == ext
-                    })
-                })
-                .unwrap_or(false);
+            let safe_ext = file_path.extension().map_or(false, |ext| {
+                safe_exts.iter().map(AsRef::as_ref).any(|v| v == ext)
+            });
 
             let safe_dir = safe_dirs.iter().any(|d| file_path.starts_with(d));
 
