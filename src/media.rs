@@ -184,11 +184,14 @@ pub async fn encode<P: AsRef<Path>>(
     }
 
     if opts.use_subtitles && subtitle_file.exists() {
-        let ffmpeg_subtitle_filename = subtitle_file
-            .to_string_lossy()
-            .replace("\\", "\\\\")
-            .replace("'", "\\'")
-            .replace(":", "\\:");
+        // This is not safe or correct way to escape, but is good enough
+        let ffmpeg_filter_escape = |s: &str| {
+            s.replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace(":", "\\:")
+        };
+
+        let ffmpeg_subtitle_filename = ffmpeg_filter_escape(&subtitle_file.to_string_lossy());
 
         // Subtitle alignment
         //
@@ -200,14 +203,18 @@ pub async fn encode<P: AsRef<Path>>(
         let subtitle_margin_right = 50;
         let subtitle_margin_vertical = 30;
         let subtitle_encoding = "UTF-8";
+        let subtitle_fontsize = 32;
+        let subtitle_fontname = ffmpeg_filter_escape("Arial");
 
-        let ffmpeg_subtitle_filter = format!("subtitles='{subtitle_filename}':charenc='{subtitle_encoding}':force_style='FontName='Arial',Fontsize=32,Outline=2,MarginL={subtitle_margin_left},MarginR={subtitle_margin_right},MarginV={subtitle_margin_vertical},Alignment={subtitle_alignment}'", 
-                subtitle_filename = ffmpeg_subtitle_filename,
-                subtitle_encoding = subtitle_encoding,
-                subtitle_margin_left = subtitle_margin_left,
-                subtitle_margin_right = subtitle_margin_right,
-                subtitle_margin_vertical = subtitle_margin_vertical,
-                subtitle_alignment = subtitle_alignment);
+        let ffmpeg_subtitle_filter = format!("subtitles='{subtitle_filename}':charenc='{subtitle_encoding}':force_style='FontName='{subtitle_fontname}',Fontsize={subtitle_fontsize},Outline=2,MarginL={subtitle_margin_left},MarginR={subtitle_margin_right},MarginV={subtitle_margin_vertical},Alignment={subtitle_alignment}'", 
+            subtitle_filename = ffmpeg_subtitle_filename,
+            subtitle_encoding = subtitle_encoding,
+            subtitle_margin_left = subtitle_margin_left,
+            subtitle_margin_right = subtitle_margin_right,
+            subtitle_margin_vertical = subtitle_margin_vertical,
+            subtitle_alignment = subtitle_alignment,
+            subtitle_fontname = subtitle_fontname,
+            subtitle_fontsize = subtitle_fontsize);
 
         video_filters.push(format!("setpts=PTS+{}/TB", opts.seek_seconds));
         video_filters.push(ffmpeg_subtitle_filter);
