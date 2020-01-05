@@ -4,6 +4,7 @@ use hyper::Response;
 use std::sync::Arc;
 
 use crate::api::ApiResponse;
+use futures::stream::StreamExt;
 use hyper::header::HeaderValue;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -11,6 +12,7 @@ use std::path::PathBuf;
 use crate::api::ApiError;
 use crate::media;
 use crate::msg;
+use std::convert::Infallible;
 
 #[derive(Serialize)]
 pub struct MediaFilesResult {
@@ -41,8 +43,8 @@ pub async fn media_show(
     let mut opts = media::EncodeVideoOpts::default();
     opts.use_subtitles = request.use_subtitles;
     opts.seek_seconds = request.seek_seconds;
-    opts.tv_resolution = Some((1280, 720));
-    opts.crop_percent = 15;
+    opts.tv_resolution = (1280, 720);
+    opts.crop_percent = 12;
     // println!(
     //     "Validate file {} {:?} {:?} {:?}",
     //     file,
@@ -57,8 +59,9 @@ pub async fn media_show(
         .notifier
         .send(msg::NotifyMessage::EncodingStarted)
         .unwrap();
-    let stream = media::encode(file, opts).await?;
-    let mut response = Response::new(Body::wrap_stream(stream));
+    let stream = media::encode(file, opts).await;
+    // let mut response = Response::new(Body::from(stream));
+    let mut response = Response::new(Body::wrap_stream(stream.map(|e| Ok::<_, Infallible>(e))));
 
     // Headers
     response

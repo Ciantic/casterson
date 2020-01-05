@@ -1,10 +1,14 @@
 use bytes::BytesMut;
+use futures::stream::TryStreamExt;
 use futures::Stream;
-use futures_util::TryStreamExt;
+use std::iter::Iterator;
+use tokio::stream::StreamExt;
+// use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::canonicalize;
+use std::future;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -64,25 +68,45 @@ pub struct FFProbeStreams {
 }
 
 #[derive(Default, Serialize, Eq, PartialEq, Deserialize, Debug)]
+pub struct FFProbeFormat {
+    pub duration: String,
+}
+
+#[derive(Default, Serialize, Eq, PartialEq, Deserialize, Debug)]
 pub struct FFProbeResult {
-    pub streams: Vec<FFProbeStreams>,
-    // Other omitted
+    pub streams: (FFProbeStreams,), // Only first video stream
+    pub format: FFProbeFormat,      // Format (more reliable duration)
+                                    // Other omitted
+}
+
+#[derive(Default, Serialize, PartialEq, Deserialize, Debug)]
+pub struct VideoInfo {
+    codec_name: String,
+    width: i32,
+    height: i32,
+    duration: f32,
 }
 
 /// Probe video information
-pub async fn get_info<P>(file: P) -> Result<FFProbeResult, std::io::Error>
+pub async fn get_info<P>(file: P) -> Result<VideoInfo, std::io::Error>
 where
     P: AsRef<Path>,
 {
     // Fallback to string based error
     let strerr = |err| std::io::Error::new(std::io::ErrorKind::Other, err);
 
+    // Getting duration is tricky, you can read about it in here:
+    //
+    // https://trac.ffmpeg.org/wiki/FFprobeTips#Formatcontainerduration
+    //
+    // There is three ways: stream (worse), format (better), ffmpeg decoding (most accurate), following uses the format.
+
     let mut cmd = Command::new("ffprobe");
     #[rustfmt::skip]
     cmd
         .arg("-v").arg("error")
-        .arg("-select_streams").arg("v:0")
-        .arg("-show_entries").arg("stream")
+        .arg("-select_streams").arg("v:0") // Only first video stream
+        .arg("-show_entries").arg("stream=width,height,codec_name:format=duration")
         .arg("-print_format").arg("json")
         .arg(file.as_ref())
         .stdout(Stdio::piped()) // redirect the stdout
@@ -95,10 +119,26 @@ where
     let stdout =
         String::from_utf8(out.stdout).map_err(|_| strerr("Unable to decode stdout as UTF-8"))?;
 
+    let ff_result: FFProbeResult =
+        serde_json::from_str(&stdout).map_err(|_| strerr("Unable to parse json"))?;
+
+    println!("ffprobe {:?}", ff_result);
+
     if stderr != "" {
         Err(strerr(&stderr))
     } else {
-        serde_json::from_str(&stdout).map_err(|_| strerr("Unable to parse json"))
+        let duration = ff_result
+            .format
+            .duration
+            .parse()
+            .map_err(|_| strerr("Unable to parse duration"))?;
+
+        Ok(VideoInfo {
+            codec_name: ff_result.streams.0.codec_name,
+            duration: duration,
+            width: ff_result.streams.0.width,
+            height: ff_result.streams.0.height,
+        })
     }
 }
 
@@ -106,7 +146,7 @@ where
 pub struct EncodeVideoOpts {
     pub seek_seconds: i32,
     pub use_subtitles: bool,
-    pub tv_resolution: Option<(i32, i32)>,
+    pub tv_resolution: (i32, i32),
     pub crop_percent: i32,
 }
 
@@ -114,36 +154,37 @@ pub struct EncodeVideoOpts {
 pub async fn encode<P: AsRef<Path>>(
     file: P,
     opts: EncodeVideoOpts,
-) -> Result<impl Stream<Item = Result<bytes::Bytes, std::io::Error>>, std::io::Error> {
+) -> impl Stream<Item = bytes::Bytes> {
+    // ) -> impl Stream<Item = Result<bytes::Bytes, std::io::Error>> {
+    //Result<bytes::Bytes, std::io::Error>> {
     let file_ = file.as_ref();
     let mut video_filters: Vec<String> = vec![];
     let subtitle_file = file_.with_extension("srt");
+    let (tv_width, tv_height) = opts.tv_resolution;
 
-    if opts.crop_percent > 0 {
-        let video_info = get_info(file_).await?;
-        if let Some((_tv_width, _tv_height)) = opts.tv_resolution {
+    if opts.crop_percent > 0 && tv_width > 0 && tv_height > 0 {
+        if let Ok(video) = get_info(file_).await {
+            let video_width: f64 = f64::from(video.width);
+            let video_height: f64 = f64::from(video.height);
+            // let video_ar: f64 = video_width / video_height;
+            let tv_ar: f64 = f64::from(tv_width) / f64::from(tv_height);
+            let mut crop_width: f64 = tv_ar * video_height;
+            let crop_height: f64 = video_height;
+            let crop_percent: f64 = 100.0f64 * (video_width - crop_width) / video_width;
+            let crop_max_percent = f64::from(opts.crop_percent);
 
-            // let tv_ar = tv_width / tv
+            if crop_percent > crop_max_percent {
+                crop_width = (1f64 - (crop_max_percent / 100f64)) * video_width;
+            }
+
+            video_filters.push(format!(
+                "crop={crop_width}:{crop_height}",
+                crop_width = crop_width,
+                crop_height = crop_height
+            ));
         }
-
-        /*
-        if CROP_MAX_PERCENT > 0:
-            crop_width = tv_ar * movie_height
-            crop_height = movie_height
-            crop_percent = 100 * (movie_width - crop_width) / movie_width
-
-            if crop_percent >= CROP_MAX_PERCENT:
-                crop_width = (1.0 - (CROP_MAX_PERCENT / 100)) * movie_width
-                crop_percent = 100 * (movie_width - crop_width) / movie_width
-
-            ffmpeg_crop_filter = f"crop={crop_width}:{crop_height}"
-            ffmpeg_video_filters.append(ffmpeg_crop_filter)
-        */
-        // let tv_ar = t
-        // let crop_width =
     }
 
-    println!("subtitle file {}", subtitle_file.to_string_lossy());
     if opts.use_subtitles && subtitle_file.exists() {
         let ffmpeg_subtitle_filename = subtitle_file
             .to_string_lossy()
@@ -202,9 +243,13 @@ pub async fn encode<P: AsRef<Path>>(
         .stderr(Stdio::piped()); // redirect the stderr (suppressed)
     let mut child = cmd.spawn().expect("panic! failed to spawn");
     let stdout = child.stdout().take().expect("panic! stdout failed!");
-    Ok(FramedRead::new(stdout, BytesCodec::new()).map_ok(BytesMut::freeze))
+    FramedRead::new(stdout, BytesCodec::new()).map(|v| match v {
+        Ok(v) => BytesMut::freeze(v),
+        Err(err) => bytes::Bytes::default(),
+    })
 }
 
+// Unit tests
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +257,14 @@ mod tests {
     #[tokio::test]
     async fn test_get_info() {
         let result = get_info(r"./test_data/big_buck_bunny.mp4").await.unwrap();
-        assert_eq!(1920, result.streams[0].width);
+        assert_eq!(
+            VideoInfo {
+                codec_name: "h264".into(),
+                width: 1920,
+                height: 1080,
+                duration: 596.50134
+            },
+            result
+        );
     }
 }
