@@ -151,9 +151,10 @@ pub struct EncodeVideoOpts {
 pub async fn encode<P: AsRef<Path>>(
     file: P,
     opts: EncodeVideoOpts,
-) -> impl Stream<Item = bytes::Bytes> {
-    // ) -> impl Stream<Item = Result<bytes::Bytes, std::io::Error>> {
-    //Result<bytes::Bytes, std::io::Error>> {
+) -> Result<impl Stream<Item = bytes::Bytes>, std::io::Error> {
+    // Fallback to string based error
+    let strerr = |err| std::io::Error::new(std::io::ErrorKind::Other, err);
+
     let file_ = file.as_ref();
     let mut video_filters: Vec<String> = vec![];
     let subtitle_file = file_.with_extension("srt");
@@ -238,12 +239,20 @@ pub async fn encode<P: AsRef<Path>>(
         .arg("pipe:1")
         .stdout(Stdio::piped()) // redirect the stdout
         .stderr(Stdio::piped()); // redirect the stderr (suppressed)
-    let mut child = cmd.spawn().expect("panic! failed to spawn");
-    let stdout = child.stdout().take().expect("panic! stdout failed!");
-    FramedRead::new(stdout, BytesCodec::new()).map(|v| match v {
+    let mut child = cmd.spawn()?;
+    let stdout = child
+        .stdout()
+        .take()
+        .map_or(Err(strerr("Unable to capture stdout")), |v| Ok(v))?;
+
+    // Creates a stream of bytes which does not fail (intentionally)
+    Ok(FramedRead::new(stdout, BytesCodec::new()).map(|v| match v {
         Ok(v) => BytesMut::freeze(v),
-        Err(_) => bytes::Bytes::default(),
-    })
+        Err(err) => {
+            eprintln!("Unexpected IO error occured during encoding: {:?}", err);
+            bytes::Bytes::new()
+        }
+    }))
 }
 
 // Unit tests

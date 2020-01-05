@@ -59,8 +59,7 @@ pub async fn media_show(
         .notifier
         .send(msg::NotifyMessage::EncodingStarted)
         .unwrap();
-    let stream = media::encode(file, opts).await;
-    // let mut response = Response::new(Body::from(stream));
+    let stream = media::encode(file, opts).await?;
     let mut response = Response::new(Body::wrap_stream(stream.map(|e| Ok::<_, Infallible>(e))));
 
     // Headers
