@@ -1,18 +1,15 @@
 use bytes::BytesMut;
-use futures::stream::TryStreamExt;
 use futures::Stream;
-use std::iter::Iterator;
-use tokio::stream::StreamExt;
-// use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs::canonicalize;
-use std::future;
+use std::iter::Iterator;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
+use tokio::stream::StreamExt;
 use tokio_util::codec::{BytesCodec, FramedRead};
 use walkdir;
 
@@ -245,7 +242,7 @@ pub async fn encode<P: AsRef<Path>>(
     let stdout = child.stdout().take().expect("panic! stdout failed!");
     FramedRead::new(stdout, BytesCodec::new()).map(|v| match v {
         Ok(v) => BytesMut::freeze(v),
-        Err(err) => bytes::Bytes::default(),
+        Err(_) => bytes::Bytes::default(),
     })
 }
 
