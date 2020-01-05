@@ -3,6 +3,7 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::fmt::Display;
 use std::fs::canonicalize;
 use std::iter::Iterator;
 use std::path::Path;
@@ -119,8 +120,6 @@ where
     let ff_result: FFProbeResult =
         serde_json::from_str(&stdout).map_err(|_| strerr("Unable to parse json"))?;
 
-    println!("ffprobe {:?}", ff_result);
-
     if stderr != "" {
         Err(strerr(&stderr))
     } else {
@@ -139,12 +138,68 @@ where
     }
 }
 
+/// This is not safe or correct way to escape
+fn ffmpeg_filter_escape(s: &str) -> String {
+    s.replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace(":", "\\:")
+}
+
+/// FFMpeg subtitle options
+///
+/// http://ffmpeg.org/ffmpeg-filters.html#subtitles-1
+/// https://fileformats.fandom.com/wiki/SubStation_Alpha
+#[derive(Serialize, Deserialize)]
+pub struct FFMpegSubtitleOpts {
+    // Subtitle opts
+    pub encoding: String,
+
+    // ASS Style Opts
+    pub alignment: i32,
+    pub margin_left: i32,
+    pub margin_right: i32,
+    pub margin_vertical: i32,
+    pub size: f32,
+    pub spacing: f32,
+    pub outline: f32,
+    pub font_name: String,
+}
+
+impl Default for FFMpegSubtitleOpts {
+    fn default() -> Self {
+        FFMpegSubtitleOpts {
+            // Subtitle opts
+            encoding: "UTF-8".into(),
+
+            // ASS Style Opts
+            alignment: 1,
+            margin_left: 50,
+            margin_right: 50,
+            margin_vertical: 30,
+            size: 32.0,
+            spacing: 0.0,
+            outline: 1.5,
+            font_name: "Arial".into(),
+        }
+    }
+}
+
+impl Display for FFMpegSubtitleOpts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "charenc='{}':force_style='FontName='{}',Fontsize={},Spacing={},Outline={},MarginL={},MarginR={},MarginV={},Alignment={}'",
+            ffmpeg_filter_escape(&self.encoding),
+            ffmpeg_filter_escape(&self.font_name), 
+            self.size, self.spacing, self.outline, self.margin_left, self.margin_right, self.margin_vertical, self.alignment)
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct EncodeVideoOpts {
     pub seek_seconds: i32,
     pub use_subtitles: bool,
     pub output_resolution: (i32, i32),
     pub crop_max_percent: i32,
+    pub subtitle_opts: FFMpegSubtitleOpts,
 }
 
 /// Returns video stream as bytes or io::Error
@@ -162,6 +217,8 @@ pub async fn encode<P: AsRef<Path>>(
 
     if opts.crop_max_percent > 0 && output_width > 0 && output_height > 0 {
         if let Ok(video) = get_info(file_).await {
+            // Crop from the left and right towards the output_resolution,
+            // amount of cropping can be controlled by crop_max_percent
             let video_width: f64 = f64::from(video.width);
             let video_height: f64 = f64::from(video.height);
             // let video_ar: f64 = video_width / video_height;
@@ -176,59 +233,19 @@ pub async fn encode<P: AsRef<Path>>(
             }
 
             video_filters.push(format!(
-                "crop={crop_width}:{crop_height}",
-                crop_width = crop_width,
-                crop_height = crop_height
+                "crop={}:{}", crop_width,crop_height
             ));
         }
     }
 
     if opts.use_subtitles && subtitle_file.exists() {
-        // This is not safe or correct way to escape, but is good enough
-        let ffmpeg_filter_escape = |s: &str| {
-            s.replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace(":", "\\:")
-        };
-
-        let ffmpeg_subtitle_filename = ffmpeg_filter_escape(&subtitle_file.to_string_lossy());
-
-        // Subtitle alignment
-        //
-        // Values may be 1=Left, 2=Centered, 3=Right. Add 4 to the value for a
-        // "Toptitle". Add 8 to the value for a "Midtitle". eg. 5 =
-        // left-justified toptitle
-        let subtitle_alignment = 1;
-        let subtitle_margin_left = 50;
-        let subtitle_margin_right = 50;
-        let subtitle_margin_vertical = 30;
-        let subtitle_encoding = "UTF-8";
-        let subtitle_fontsize = 32;
-        let subtitle_fontname = ffmpeg_filter_escape("Arial");
-
-        let ffmpeg_subtitle_filter = format!("subtitles='{subtitle_filename}':charenc='{subtitle_encoding}':force_style='FontName='{subtitle_fontname}',Fontsize={subtitle_fontsize},Outline=2,MarginL={subtitle_margin_left},MarginR={subtitle_margin_right},MarginV={subtitle_margin_vertical},Alignment={subtitle_alignment}'", 
-            subtitle_filename = ffmpeg_subtitle_filename,
-            subtitle_encoding = subtitle_encoding,
-            subtitle_margin_left = subtitle_margin_left,
-            subtitle_margin_right = subtitle_margin_right,
-            subtitle_margin_vertical = subtitle_margin_vertical,
-            subtitle_alignment = subtitle_alignment,
-            subtitle_fontname = subtitle_fontname,
-            subtitle_fontsize = subtitle_fontsize);
-
         video_filters.push(format!("setpts=PTS+{}/TB", opts.seek_seconds));
-        video_filters.push(ffmpeg_subtitle_filter);
+        video_filters.push(format!("subtitles='{}':{}",
+            ffmpeg_filter_escape(&subtitle_file.to_string_lossy()),
+            opts.subtitle_opts
+        ));
         video_filters.push("setpts=PTS-STARTPTS".into());
     }
-
-    let video_filters_arg: Vec<String> = {
-        let vfs = video_filters.join(",");
-        if vfs != "" {
-            vec!["-vf".into(), vfs]
-        } else {
-            vec![]
-        }
-    };
 
     let mut cmd = Command::new("ffmpeg");
     #[rustfmt::skip]
@@ -236,7 +253,11 @@ pub async fn encode<P: AsRef<Path>>(
         .arg("-ss").arg(opts.seek_seconds.to_string())
         .arg("-hwaccel").arg("dxva2")
         .arg("-i").arg(file_.as_os_str())
-        .args(video_filters_arg)
+        .args(if video_filters.len() > 0 {
+                vec!["-vf".into(), video_filters.join(",")]
+            } else {
+                vec![]
+            })
         .arg("-acodec").arg("aac")
         .arg("-c:v").arg("h264_nvenc")
         .arg("-preset").arg("slow")
@@ -246,11 +267,12 @@ pub async fn encode<P: AsRef<Path>>(
         .arg("pipe:1")
         .stdout(Stdio::piped()) // redirect the stdout
         .stderr(Stdio::piped()); // redirect the stderr (suppressed)
+
     let mut child = cmd.spawn()?;
     let stdout = child
         .stdout()
         .take()
-        .map_or(Err(strerr("Unable to capture stdout")), |v| Ok(v))?;
+        .map_or(Err(strerr("Unable to capture stdout")), Ok)?;
 
     // Creates a stream of bytes which does not fail (intentionally)
     Ok(FramedRead::new(stdout, BytesCodec::new()).map(|v| match v {

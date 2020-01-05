@@ -58,13 +58,10 @@ async fn main() {
         loop {
             let value = rec.recv().unwrap();
             match value {
-                msg::NotifyMessage::EncodingStarted => {
-                    println!("Encoding börjat");
-                }
                 msg::NotifyMessage::ErrorDuringCasting(err) => {
                     println!("Error during casting {:?}", err);
                 }
-                msg::NotifyMessage::RequestClosed => println!("Request closed"),
+                _ => (),
             }
         }
     });
