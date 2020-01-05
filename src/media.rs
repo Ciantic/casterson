@@ -146,8 +146,8 @@ where
 pub struct EncodeVideoOpts {
     pub seek_seconds: i32,
     pub use_subtitles: bool,
-    pub tv_resolution: (i32, i32),
-    pub crop_percent: i32,
+    pub output_resolution: (i32, i32),
+    pub crop_max_percent: i32,
 }
 
 /// Returns video stream as bytes or io::Error
@@ -160,18 +160,18 @@ pub async fn encode<P: AsRef<Path>>(
     let file_ = file.as_ref();
     let mut video_filters: Vec<String> = vec![];
     let subtitle_file = file_.with_extension("srt");
-    let (tv_width, tv_height) = opts.tv_resolution;
+    let (output_width, output_height) = opts.output_resolution;
 
-    if opts.crop_percent > 0 && tv_width > 0 && tv_height > 0 {
+    if opts.crop_max_percent > 0 && output_width > 0 && output_height > 0 {
         if let Ok(video) = get_info(file_).await {
             let video_width: f64 = f64::from(video.width);
             let video_height: f64 = f64::from(video.height);
             // let video_ar: f64 = video_width / video_height;
-            let tv_ar: f64 = f64::from(tv_width) / f64::from(tv_height);
-            let mut crop_width: f64 = tv_ar * video_height;
+            let output_ar: f64 = f64::from(output_width) / f64::from(output_height);
+            let mut crop_width: f64 = output_ar * video_height;
             let crop_height: f64 = video_height;
             let crop_percent: f64 = 100.0f64 * (video_width - crop_width) / video_width;
-            let crop_max_percent = f64::from(opts.crop_percent);
+            let crop_max_percent = f64::from(opts.crop_max_percent);
 
             if crop_percent > crop_max_percent {
                 crop_width = (1f64 - (crop_max_percent / 100f64)) * video_width;

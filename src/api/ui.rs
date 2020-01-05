@@ -43,8 +43,8 @@ pub async fn media_show(
     let mut opts = media::EncodeVideoOpts::default();
     opts.use_subtitles = request.use_subtitles;
     opts.seek_seconds = request.seek_seconds;
-    opts.tv_resolution = (1280, 720);
-    opts.crop_percent = 12;
+    opts.output_resolution = (1280, 720);
+    opts.crop_max_percent = 12;
     // println!(
     //     "Validate file {} {:?} {:?} {:?}",
     //     file,
