@@ -58,7 +58,7 @@ pub fn is_safe_file<P: AsRef<Path>, D: AsRef<Path>, E: AsRef<OsStr>>(
 }
 
 #[derive(Default, Serialize, Eq, PartialEq, Deserialize, Debug)]
-pub struct FFProbeStreams {
+struct FFProbeStreams {
     pub codec_name: String,
     pub width: i32,
     pub height: i32,
@@ -66,12 +66,12 @@ pub struct FFProbeStreams {
 }
 
 #[derive(Default, Serialize, Eq, PartialEq, Deserialize, Debug)]
-pub struct FFProbeFormat {
+struct FFProbeFormat {
     pub duration: String,
 }
 
 #[derive(Default, Serialize, Eq, PartialEq, Deserialize, Debug)]
-pub struct FFProbeResult {
+struct FFProbeResult {
     pub streams: (FFProbeStreams,), // Only first video stream
     pub format: FFProbeFormat,      // Format (more reliable duration)
                                     // Other omitted
@@ -151,10 +151,10 @@ fn ffmpeg_filter_escape(s: &str) -> String {
 /// https://fileformats.fandom.com/wiki/SubStation_Alpha
 #[derive(Serialize, Deserialize)]
 pub struct FFMpegSubtitleOpts {
-    // Subtitle opts
+    // charenc:
     pub encoding: String,
 
-    // ASS Style Opts
+    // force_style: ASS Style Opts
     pub alignment: i32,
     pub margin_left: i32,
     pub margin_right: i32,
