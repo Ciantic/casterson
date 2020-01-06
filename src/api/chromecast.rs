@@ -2,6 +2,7 @@ use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::sync::Arc;
+use url::Url;
 
 use crate::api::ApiError;
 use crate::api::ApiResponse;
@@ -16,12 +17,16 @@ pub struct ChromecastRequest {
     dest_id: Option<String>,
 }
 
+#[derive(Deserialize, Clone, Debug)]
+pub struct ChromecastCastRequest {
+    url: Url,
+}
+
 pub struct ChromecastApi {
     pub state: Arc<AppState>,
     pub request: ChromecastRequest,
 }
 
-// #[async_trait]
 impl ChromecastApi {
     fn get_receiver(&self) -> chromecast::MediaReceiver {
         chromecast::get_default_media_receiver(
@@ -52,11 +57,12 @@ impl ChromecastApi {
             .map_err(ApiError::ChromecastError)
     }
 
-    pub async fn cast(&self) -> ApiResponse<()> {
+    pub async fn cast(&self, cast_request: ChromecastCastRequest) -> ApiResponse<()> {
         let state = self.state.clone();
         let receiver = self.get_receiver();
+        let url = cast_request.url;
         tokio::spawn(async move {
-            match receiver.cast("http://192.168.8.103:3000/file/encode") {
+            match receiver.cast(url) {
                 Ok(_) => {}
                 Err(err) => {
                     (*state)

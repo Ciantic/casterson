@@ -165,7 +165,10 @@ async fn handle_chromecast_request(
     let api = chromecast::ChromecastApi { state, request };
 
     match uri.path() {
-        "/chromecast/cast" => to_response(api.cast().await),
+        "/chromecast/cast" => {
+            let cast_request: chromecast::ChromecastCastRequest = serde_json::from_slice(&body)?;
+            to_response(api.cast(cast_request).await)
+        }
         "/chromecast/pause" => to_response(api.pause().await),
         "/chromecast/play" => to_response(api.play().await),
         "/chromecast/stop" => to_response(api.stop().await),

@@ -2,12 +2,14 @@ extern crate rust_cast;
 
 use rust_cast::channels::connection::ConnectionResponse;
 use rust_cast::channels::heartbeat::HeartbeatResponse;
+use rust_cast::channels::media::MediaResponse;
 use rust_cast::channels::media::{IdleReason, Media, PlayerState, StreamType};
 use rust_cast::channels::receiver::CastDeviceApp;
 use rust_cast::errors::Error;
 use rust_cast::{CastDevice, ChannelMessage};
 use serde::Serializer;
 use std::net::IpAddr;
+use url::Url;
 
 use serde::Serialize;
 use std::str::FromStr;
@@ -41,7 +43,7 @@ fn serialize_player_state<S>(x: &PlayerState, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    s.serialize_str(x.to_string().as_str())
+    s.serialize_str(&x.to_string())
 }
 
 fn serialize_idle_reason<S>(x: &Option<IdleReason>, s: S) -> Result<S::Ok, S::Error>
@@ -70,7 +72,7 @@ pub trait BaseMediaReceiver {
     fn play(&self) -> Result<(), ChromecastError>;
     fn pause(&self) -> Result<(), ChromecastError>;
     fn stop(&self) -> Result<(), ChromecastError>;
-    fn cast(&self, url: &str) -> Result<(), ChromecastError>;
+    fn cast(&self, url: Url) -> Result<(), ChromecastError>;
     fn get_status(&self) -> Result<ChromecastStatus, ChromecastError>;
 }
 
@@ -103,7 +105,7 @@ impl BaseMediaReceiver for MediaReceiver {
     fn stop(&self) -> Result<(), ChromecastError> {
         manage(self, ManageCommmand::Stop)
     }
-    fn cast(&self, url: &str) -> Result<(), ChromecastError> {
+    fn cast(&self, url: Url) -> Result<(), ChromecastError> {
         cast(self, url)
     }
     fn get_status(&self) -> Result<ChromecastStatus, ChromecastError> {
@@ -198,7 +200,7 @@ fn get_status(med: &MediaReceiver) -> Result<ChromecastStatus, ChromecastError> 
     }
 }
 
-fn cast(med: &MediaReceiver, url: &str) -> Result<(), ChromecastError> {
+fn cast(med: &MediaReceiver, url: Url) -> Result<(), ChromecastError> {
     let cast_device = CastDevice::connect_without_host_verification(med.ip.to_string(), med.port)?;
 
     // Connect and ping
@@ -224,7 +226,7 @@ fn cast(med: &MediaReceiver, url: &str) -> Result<(), ChromecastError> {
         app.session_id.as_str(),
         &Media {
             // http://commondatastorage.googleapis.com/gtv-videos-bucket/big_buck_bunny_1080p.mp4
-            content_id: url.into(),
+            content_id: url.to_string(),
             content_type: "".into(),
             stream_type: StreamType::Live, // "buffered"
             duration: None,
@@ -246,6 +248,12 @@ fn cast(med: &MediaReceiver, url: &str) -> Result<(), ChromecastError> {
             }
             Ok(ChannelMessage::Connection(ConnectionResponse::Close)) => {
                 println!("[Close connection]");
+                break;
+            }
+
+            Ok(ChannelMessage::Media(MediaResponse::LoadFailed(_)))
+            | Ok(ChannelMessage::Media(MediaResponse::LoadCancelled(_))) => {
+                println!("[Loading failed]");
                 break;
             }
 
