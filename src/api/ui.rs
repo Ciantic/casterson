@@ -31,6 +31,8 @@ pub async fn get_media_files(state: Arc<AppState>) -> ApiResponse<MediaFilesResu
 #[derive(Deserialize)]
 pub struct MediaShowRequest {
     pub file: String,
+
+    #[serde(default)]
     pub encode_opts: media::EncodeOpts,
 }
 

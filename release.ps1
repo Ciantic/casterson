@@ -12,6 +12,6 @@
 # should be set! RUSTFLAGS makes the builds statically linked!
 
 # Remove-Item env:VCPKGRS_DYNAMIC
-$env:RUSTFLAGS="-Ctarget-feature=+crt-static"
+# $env:RUSTFLAGS="-Ctarget-feature=+crt-static"
 
 cargo build --release

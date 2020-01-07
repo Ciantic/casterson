@@ -34,7 +34,7 @@ pub struct CliOpts {
     media_exts: Vec<String>,
 
     /// Directories of media files
-    #[structopt(name = "DIR", parse(try_from_str = parse_path_canonicalized))]
+    #[structopt(name = "DIR", required = true, parse(try_from_str = parse_path_canonicalized))]
     dir: Vec<PathBuf>,
 }
 
@@ -54,18 +54,22 @@ async fn main() {
     for dir in &*state.opts.dir {
         println!("Using media directory: {}", dir.display());
     }
+
     tokio::spawn(async move {
         loop {
-            let value = rec.recv().unwrap();
-            match value {
-                msg::NotifyMessage::ErrorDuringCasting(err) => {
+            match rec.recv() {
+                Ok(msg::NotifyMessage::ErrorDuringCasting(err)) => {
                     println!("Error during casting {:?}", err);
                 }
                 _ => (),
             }
         }
     });
-    api::create_server(state).await;
+
+    if let Err(err) = api::start_server(state).await {
+        eprintln!("{}", err);
+        std::process::exit(1);
+    }
 }
 
 /// Parse path and canonicalize

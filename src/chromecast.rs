@@ -1,11 +1,23 @@
+/// Chromecast default media reciever
+///
+/// # Example
+///
+/// ```rust
+/// let rec = get_default_media_receiver("192.168.8.106")
+/// rec.cast("http://commondatastorage.googleapis.com/gtv-videos-bucket/big_buck_bunny_1080p.mp4").unwrap();
+///
+/// rec.pause().unwrap();
+/// rec.play().unwrap();
+/// // reciever.stop();
+/// ```
 extern crate rust_cast;
 
+use derive_more::From;
 use rust_cast::channels::connection::ConnectionResponse;
 use rust_cast::channels::heartbeat::HeartbeatResponse;
 use rust_cast::channels::media::MediaResponse;
 use rust_cast::channels::media::{IdleReason, Media, PlayerState, StreamType};
 use rust_cast::channels::receiver::CastDeviceApp;
-use rust_cast::errors::Error;
 use rust_cast::{CastDevice, ChannelMessage};
 use serde::Serializer;
 use std::net::IpAddr;
@@ -17,48 +29,24 @@ use std::str::FromStr;
 const DEFAULT_DESTINATION_ID: &str = "receiver-0";
 const DEFAULT_PORT: u16 = 8009;
 
-#[derive(Debug)]
-pub enum ChromecastError {
-    AppNotFound,
-    AppStatusNotFound,
-    RustCastError(Error),
-}
-
-impl From<rust_cast::errors::Error> for ChromecastError {
-    fn from(w: rust_cast::errors::Error) -> ChromecastError {
-        ChromecastError::RustCastError(w)
+pub fn get_default_media_receiver(
+    ip: &IpAddr,
+    port: Option<u16>,
+    dest_id: Option<String>,
+) -> MediaReceiver {
+    MediaReceiver {
+        ip: *ip,
+        port: port.unwrap_or(DEFAULT_PORT),
+        dest_id: dest_id.unwrap_or(DEFAULT_DESTINATION_ID.into()),
     }
 }
 
-/*
-let rec = get_default_media_receiver("192.168.8.106")
-rec.cast("http://commondatastorage.googleapis.com/gtv-videos-bucket/big_buck_bunny_1080p.mp4").unwrap();
-
-rec.pause().unwrap();
-rec.play().unwrap();
-// reciever.stop();
-*/
-
-fn serialize_player_state<S>(x: &PlayerState, s: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    s.serialize_str(&x.to_string())
+#[derive(Debug, From)]
+pub enum ChromecastError {
+    AppNotFound,
+    AppStatusNotFound,
+    RustCastError(rust_cast::errors::Error),
 }
-
-fn serialize_idle_reason<S>(x: &Option<IdleReason>, s: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    s.serialize_str(match x {
-        Some(IdleReason::Cancelled) => "CANCELLED",
-        Some(IdleReason::Interrupted) => "INTERRUPTED",
-        Some(IdleReason::Finished) => "FINISHED",
-        Some(IdleReason::Error) => "ERROR",
-        _ => "",
-    })
-}
-
 #[derive(Serialize)]
 pub struct ChromecastStatus {
     current_time: Option<f32>,
@@ -81,18 +69,6 @@ pub struct MediaReceiver {
     ip: IpAddr,
     port: u16,
     dest_id: String,
-}
-
-pub fn get_default_media_receiver(
-    ip: &IpAddr,
-    port: Option<u16>,
-    dest_id: Option<String>,
-) -> MediaReceiver {
-    MediaReceiver {
-        ip: *ip,
-        port: port.unwrap_or(DEFAULT_PORT),
-        dest_id: dest_id.unwrap_or(DEFAULT_DESTINATION_ID.into()),
-    }
 }
 
 impl BaseMediaReceiver for MediaReceiver {
@@ -272,4 +248,24 @@ fn cast(med: &MediaReceiver, url: Url) -> Result<(), ChromecastError> {
     }
     println!("Close thread!");
     Ok(())
+}
+
+fn serialize_player_state<S>(x: &PlayerState, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    s.serialize_str(&x.to_string())
+}
+
+fn serialize_idle_reason<S>(x: &Option<IdleReason>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    s.serialize_str(match x {
+        Some(IdleReason::Cancelled) => "CANCELLED",
+        Some(IdleReason::Interrupted) => "INTERRUPTED",
+        Some(IdleReason::Finished) => "FINISHED",
+        Some(IdleReason::Error) => "ERROR",
+        _ => "",
+    })
 }

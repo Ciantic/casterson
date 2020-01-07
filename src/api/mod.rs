@@ -1,46 +1,24 @@
+use crate::chromecast as chromecast_main;
+use crate::AppState;
+use derive_more::From;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::Method;
 use hyper::{Body, Request, Response, Server};
+use percent_encoding::percent_decode_str;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
-
 pub mod chromecast;
 pub mod ui;
 
-use crate::chromecast as chromecast_main;
-use crate::media;
-use crate::AppState;
-use ui::MediaShowRequest;
-
-#[derive(Debug)]
+#[derive(Debug, From)]
 pub enum ApiError {
     NotFound,
     InvalidMediaFile(String),
     ChromecastError(chromecast_main::ChromecastError),
     JsonError(serde_json::error::Error),
     IoError(std::io::Error),
-    // HyperError(hyper::error::Error),
-}
-
-impl From<chromecast_main::ChromecastError> for ApiError {
-    fn from(w: chromecast_main::ChromecastError) -> ApiError {
-        ApiError::ChromecastError(w)
-    }
-}
-
-impl From<serde_json::error::Error> for ApiError {
-    fn from(w: serde_json::error::Error) -> ApiError {
-        ApiError::JsonError(w)
-    }
-}
-
-impl From<std::io::Error> for ApiError {
-    fn from(w: std::io::Error) -> ApiError {
-        ApiError::IoError(w)
-    }
 }
 
 #[derive(Serialize)]
@@ -78,20 +56,6 @@ impl Into<ApiJsonError> for ApiError {
         }
     }
 }
-
-// pub struct ApiResponse<T>(Result<T, ApiError>)
-// where
-//     T: Serialize;
-
-// impl<T> From<Result<Response<Body>, ApiError>> for ApiResponse<T>
-// where
-//     T: Serialize,
-// {
-//     fn from(err: Result<Response<Body>, ApiError>) -> Self {
-//         unimplemented!()
-//     }
-// }
-
 pub type ApiResponse<S> = Result<S, ApiError>;
 
 fn to_response<T>(resp: ApiResponse<T>) -> Result<Response<Body>, ApiError>
@@ -102,17 +66,14 @@ where
         let json = serde_json::to_string(&v).unwrap();
         Response::new(Body::from(json))
     })
-    // .map_err(|e| {
-    //     let json_err: ApiJsonError = e.into();
-    //     let json = serde_json::to_string(&json_err).unwrap();
-    //     Response::new(Body::from(json))
-    // })
-    // .unwrap_or_else(|e| e)
 }
 
 /// Create hyper server
-pub async fn create_server(state: Arc<AppState>) {
-    println!("Server listening at: {}:{}", state.opts.ip, state.opts.port);
+pub async fn start_server(state: Arc<AppState>) -> Result<(), hyper::error::Error> {
+    println!(
+        "Trying to start server at: {}:{} ...",
+        state.opts.ip, state.opts.port
+    );
     let addr = SocketAddr::from((state.opts.ip, state.opts.port));
 
     // Creates a service creator "MakeSvc"
@@ -126,11 +87,9 @@ pub async fn create_server(state: Arc<AppState>) {
             }))
         }
     });
-    let server = Server::bind(&addr).serve(make_svc);
-    if let Err(e) = server.await {
-        eprintln!("Server error: {}", e);
-    }
-    println!("Server closed");
+    let builder = Server::try_bind(&addr)?;
+    println!("Server is now listening.");
+    Ok(builder.serve(make_svc).await?)
 }
 
 async fn handle_request(
@@ -166,10 +125,7 @@ async fn handle_chromecast_request(
     let api = chromecast::ChromecastApi { state, request };
 
     match uri.path() {
-        "/chromecast/cast" => {
-            let cast_request: chromecast::ChromecastCastRequest = serde_json::from_slice(&body)?;
-            to_response(api.cast(cast_request).await)
-        }
+        "/chromecast/cast" => to_response(api.cast(serde_json::from_slice(&body)?).await),
         "/chromecast/pause" => to_response(api.pause().await),
         "/chromecast/play" => to_response(api.play().await),
         "/chromecast/stop" => to_response(api.stop().await),
@@ -182,31 +138,15 @@ async fn handle_other_request(
     state: Arc<AppState>,
     request: Request<Body>,
 ) -> Result<Response<Body>, ApiError> {
-    let mut params: HashMap<String, String> = request
-        .uri()
-        .query()
-        .map(|v| {
-            url::form_urlencoded::parse(v.as_bytes())
-                .into_owned()
-                .map(|(k, v): (String, String)| (k, v))
-                .collect()
-        })
-        .unwrap_or_else(HashMap::new);
+    // This is dead simple, but unorthodox. Query string is interpreted as JSON string e.g.
+    // http://localhost/something?{"test":5}
+    let query = percent_decode_str(request.uri().query().unwrap_or(""))
+        .decode_utf8_lossy()
+        .into_owned();
 
     match (request.method(), request.uri().path()) {
         (&Method::GET, "/get_media_files") => to_response(ui::get_media_files(state).await),
-        (&Method::GET, "/media_show") => {
-            // Get file from query string
-            let file = params
-                .remove("file")
-                .map_or(Err(ApiError::NotFound), |v| Ok(v))?;
-
-            // Get encoding video opts from query string (but as a JSON string)
-            let encode_opts_str = params.remove("opts").unwrap_or("{}".into());
-            let encode_opts: media::EncodeOpts = serde_json::from_str(&encode_opts_str)?;
-
-            ui::media_show(state, MediaShowRequest { file, encode_opts }).await
-        }
+        (&Method::GET, "/media_show") => ui::media_show(state, serde_json::from_str(&query)?).await,
         _ => Err(ApiError::NotFound),
     }
 }
