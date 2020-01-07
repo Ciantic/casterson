@@ -89,7 +89,7 @@ pub async fn start_server(state: Arc<AppState>) -> Result<(), hyper::error::Erro
     });
     let builder = Server::try_bind(&addr)?;
     println!("Server is now listening.");
-    Ok(builder.serve(make_svc).await?)
+    builder.serve(make_svc).await
 }
 
 async fn handle_request(
