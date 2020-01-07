@@ -11,6 +11,7 @@ pub mod chromecast;
 pub mod ui;
 
 use crate::chromecast as chromecast_main;
+use crate::media;
 use crate::AppState;
 use ui::MediaShowRequest;
 
@@ -181,7 +182,7 @@ async fn handle_other_request(
     state: Arc<AppState>,
     request: Request<Body>,
 ) -> Result<Response<Body>, ApiError> {
-    let params: HashMap<String, String> = request
+    let mut params: HashMap<String, String> = request
         .uri()
         .query()
         .map(|v| {
@@ -195,28 +196,16 @@ async fn handle_other_request(
     match (request.method(), request.uri().path()) {
         (&Method::GET, "/get_media_files") => to_response(ui::get_media_files(state).await),
         (&Method::GET, "/media_show") => {
-            // Use subtitles by default true
-            let use_subtitles = params.get("use_subtitles").map_or(true, |v| v == "1");
-
-            // Seek seconds (integer for now)
-            let seek_seconds: i32 = params
-                .get("seek_seconds")
-                .map_or(0, |v| v.parse().unwrap_or(0));
-
             // Get file from query string
             let file = params
-                .get("file")
-                .map_or(Err(ApiError::NotFound), |v| Ok(v.clone()))?;
+                .remove("file")
+                .map_or(Err(ApiError::NotFound), |v| Ok(v))?;
 
-            ui::media_show(
-                state,
-                MediaShowRequest {
-                    file,
-                    use_subtitles,
-                    seek_seconds,
-                },
-            )
-            .await
+            // Get encoding video opts from query string (but as a JSON string)
+            let encode_opts_str = params.remove("opts").unwrap_or("{}".into());
+            let encode_opts: media::EncodeOpts = serde_json::from_str(&encode_opts_str)?;
+
+            ui::media_show(state, MediaShowRequest { file, encode_opts }).await
         }
         _ => Err(ApiError::NotFound),
     }

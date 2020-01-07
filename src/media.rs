@@ -194,7 +194,8 @@ impl Display for FFMpegSubtitleOpts {
 }
 
 #[derive(Default, Serialize, Deserialize)]
-pub struct EncodeVideoOpts {
+#[serde(default)]
+pub struct EncodeOpts {
     pub seek_seconds: i32,
     pub use_subtitles: bool,
     pub output_resolution: (i32, i32),
@@ -205,7 +206,7 @@ pub struct EncodeVideoOpts {
 /// Returns video stream as bytes or io::Error
 pub async fn encode<P: AsRef<Path>>(
     file: P,
-    opts: EncodeVideoOpts,
+    opts: EncodeOpts,
 ) -> Result<impl Stream<Item = bytes::Bytes>, std::io::Error> {
     // Fallback to string based error
     let strerr = |err| std::io::Error::new(std::io::ErrorKind::Other, err);

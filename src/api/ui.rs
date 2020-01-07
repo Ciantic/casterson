@@ -31,8 +31,7 @@ pub async fn get_media_files(state: Arc<AppState>) -> ApiResponse<MediaFilesResu
 #[derive(Deserialize)]
 pub struct MediaShowRequest {
     pub file: String,
-    pub seek_seconds: i32,
-    pub use_subtitles: bool,
+    pub encode_opts: media::EncodeOpts,
 }
 
 pub async fn media_show(
@@ -40,11 +39,6 @@ pub async fn media_show(
     request: MediaShowRequest,
 ) -> ApiResponse<Response<Body>> {
     let file = request.file;
-    let mut opts = media::EncodeVideoOpts::default();
-    opts.use_subtitles = request.use_subtitles;
-    opts.seek_seconds = request.seek_seconds;
-    opts.output_resolution = (1280, 720);
-    opts.crop_max_percent = 12;
     // println!(
     //     "Validate file {} {:?} {:?} {:?}",
     //     file,
@@ -59,7 +53,7 @@ pub async fn media_show(
         .notifier
         .send(msg::NotifyMessage::EncodingStarted)
         .unwrap();
-    let stream = media::encode(file, opts).await?;
+    let stream = media::encode(file, request.encode_opts).await?;
     let mut response = Response::new(Body::wrap_stream(stream.map(|e| Ok::<_, Infallible>(e))));
 
     // Headers
