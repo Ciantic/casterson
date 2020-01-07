@@ -36,17 +36,17 @@ impl ChromecastApi {
         )
     }
 
-    pub async fn pause(&self) -> ApiResponse<()> {
+    pub async fn pause(&self) -> ApiResponse<chromecast::ChromecastStatus> {
         self.get_receiver()
             .pause()
             .map_err(ApiError::ChromecastError)
     }
-    pub async fn play(&self) -> ApiResponse<()> {
+    pub async fn play(&self) -> ApiResponse<chromecast::ChromecastStatus> {
         self.get_receiver()
             .play()
             .map_err(ApiError::ChromecastError)
     }
-    pub async fn stop(&self) -> ApiResponse<()> {
+    pub async fn stop(&self) -> ApiResponse<chromecast::ChromecastStatus> {
         self.get_receiver()
             .stop()
             .map_err(ApiError::ChromecastError)

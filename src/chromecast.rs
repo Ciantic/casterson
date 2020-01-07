@@ -16,7 +16,7 @@ use derive_more::From;
 use rust_cast::channels::connection::ConnectionResponse;
 use rust_cast::channels::heartbeat::HeartbeatResponse;
 use rust_cast::channels::media::MediaResponse;
-use rust_cast::channels::media::{IdleReason, Media, PlayerState, StreamType};
+use rust_cast::channels::media::{IdleReason, Media, PlayerState, StatusEntry, StreamType};
 use rust_cast::channels::receiver::CastDeviceApp;
 use rust_cast::{CastDevice, ChannelMessage};
 use serde::Serializer;
@@ -56,10 +56,20 @@ pub struct ChromecastStatus {
     idle_reason: Option<IdleReason>,
 }
 
+impl From<StatusEntry> for ChromecastStatus {
+    fn from(status: StatusEntry) -> Self {
+        ChromecastStatus {
+            current_time: status.current_time,
+            player_state: status.player_state,
+            idle_reason: status.idle_reason,
+        }
+    }
+}
+
 pub trait BaseMediaReceiver {
-    fn play(&self) -> Result<(), ChromecastError>;
-    fn pause(&self) -> Result<(), ChromecastError>;
-    fn stop(&self) -> Result<(), ChromecastError>;
+    fn play(&self) -> Result<ChromecastStatus, ChromecastError>;
+    fn pause(&self) -> Result<ChromecastStatus, ChromecastError>;
+    fn stop(&self) -> Result<ChromecastStatus, ChromecastError>;
     fn cast(&self, url: Url) -> Result<(), ChromecastError>;
     fn get_status(&self) -> Result<ChromecastStatus, ChromecastError>;
 }
@@ -72,13 +82,13 @@ pub struct MediaReceiver {
 }
 
 impl BaseMediaReceiver for MediaReceiver {
-    fn play(&self) -> Result<(), ChromecastError> {
+    fn play(&self) -> Result<ChromecastStatus, ChromecastError> {
         manage(self, ManageCommmand::Play)
     }
-    fn pause(&self) -> Result<(), ChromecastError> {
+    fn pause(&self) -> Result<ChromecastStatus, ChromecastError> {
         manage(self, ManageCommmand::Pause)
     }
-    fn stop(&self) -> Result<(), ChromecastError> {
+    fn stop(&self) -> Result<ChromecastStatus, ChromecastError> {
         manage(self, ManageCommmand::Stop)
     }
     fn cast(&self, url: Url) -> Result<(), ChromecastError> {
@@ -95,7 +105,10 @@ enum ManageCommmand {
     Stop,
 }
 
-fn manage(med: &MediaReceiver, command: ManageCommmand) -> Result<(), ChromecastError> {
+fn manage(
+    med: &MediaReceiver,
+    command: ManageCommmand,
+) -> Result<ChromecastStatus, ChromecastError> {
     let cast_device = CastDevice::connect_without_host_verification(med.ip.to_string(), med.port)?;
 
     cast_device.connection.connect(med.dest_id.as_str())?;
@@ -122,19 +135,19 @@ fn manage(med: &MediaReceiver, command: ManageCommmand) -> Result<(), Chromecast
                 ManageCommmand::Play => cast_device
                     .media
                     .play(app.transport_id.as_str(), status.media_session_id)
-                    .map(|_| {})
+                    .map(Into::into)
                     .map_err(ChromecastError::RustCastError),
 
                 ManageCommmand::Pause => cast_device
                     .media
                     .pause(app.transport_id.as_str(), status.media_session_id)
-                    .map(|_| {})
+                    .map(Into::into)
                     .map_err(ChromecastError::RustCastError),
 
                 ManageCommmand::Stop => cast_device
                     .media
                     .stop(app.transport_id.as_str(), status.media_session_id)
-                    .map(|_| {})
+                    .map(Into::into)
                     .map_err(ChromecastError::RustCastError),
             }
         }
@@ -166,11 +179,7 @@ fn get_status(med: &MediaReceiver) -> Result<ChromecastStatus, ChromecastError> 
                 .entries
                 .pop()
                 .map_or_else(|| Err(ChromecastError::AppStatusNotFound), Ok)?;
-            Ok(ChromecastStatus {
-                current_time: status.current_time,
-                player_state: status.player_state,
-                idle_reason: status.idle_reason,
-            })
+            Ok(status.into())
         }
         None => Err(ChromecastError::AppNotFound),
     }

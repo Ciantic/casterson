@@ -149,7 +149,7 @@ fn ffmpeg_filter_escape(s: &str) -> String {
 ///
 /// http://ffmpeg.org/ffmpeg-filters.html#subtitles-1
 /// https://fileformats.fandom.com/wiki/SubStation_Alpha
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FFMpegSubtitleOpts {
     // charenc:
     pub encoding: String,
@@ -176,7 +176,7 @@ impl Default for FFMpegSubtitleOpts {
             margin_left: 50,
             margin_right: 50,
             margin_vertical: 30,
-            size: 32.0,
+            size: 26.0,
             spacing: 0.0,
             outline: 1.5,
             font_name: "Arial".into(),
@@ -193,11 +193,11 @@ impl Display for FFMpegSubtitleOpts {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EncodeOpts {
     pub seek_seconds: i32,
-    pub use_subtitles: bool,
+    pub disable_subtitles: bool,
     pub output_resolution: (i32, i32),
     pub crop_max_percent: i32,
     pub subtitle_opts: FFMpegSubtitleOpts,
@@ -210,6 +210,8 @@ pub async fn encode<P: AsRef<Path>>(
 ) -> Result<impl Stream<Item = bytes::Bytes>, std::io::Error> {
     // Fallback to string based error
     let strerr = |err| std::io::Error::new(std::io::ErrorKind::Other, err);
+
+    println!("Start encoding...");
 
     let file_ = file.as_ref();
     let mut video_filters: Vec<String> = vec![];
@@ -239,7 +241,7 @@ pub async fn encode<P: AsRef<Path>>(
         }
     }
 
-    if opts.use_subtitles && subtitle_file.exists() {
+    if !opts.disable_subtitles && subtitle_file.exists() {
         video_filters.push(format!("setpts=PTS+{}/TB", opts.seek_seconds));
         video_filters.push(format!("subtitles='{}':{}",
             ffmpeg_filter_escape(&subtitle_file.to_string_lossy()),
@@ -251,6 +253,8 @@ pub async fn encode<P: AsRef<Path>>(
     let mut cmd = Command::new("ffmpeg");
     #[rustfmt::skip]
     cmd
+        .arg("-loglevel").arg("error")
+        .arg("-stats")
         .arg("-ss").arg(opts.seek_seconds.to_string())
         .arg("-hwaccel").arg("dxva2")
         .arg("-i").arg(file_.as_os_str())
@@ -266,8 +270,8 @@ pub async fn encode<P: AsRef<Path>>(
         .arg("-movflags").arg("frag_keyframe+empty_moov")
         .arg("-f").arg("mp4")
         .arg("pipe:1")
-        .stdout(Stdio::piped()) // redirect the stdout
-        .stderr(Stdio::piped()); // redirect the stderr (suppressed)
+        .stdout(Stdio::piped()); // redirect the stdout
+        // .stderr(Stdio::piped()); // redirect the stderr (suppressed)
 
     let mut child = cmd.spawn()?;
     let stdout = child
