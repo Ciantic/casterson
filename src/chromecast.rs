@@ -114,24 +114,22 @@ fn manage(
     cast_device.connection.connect(med.dest_id.as_str())?;
     cast_device.heartbeat.ping().unwrap();
     let app_to_manage = CastDeviceApp::DefaultMediaReceiver;
-    let status = cast_device.receiver.get_status().unwrap();
+    let status = cast_device.receiver.get_status()?;
     let app = status
         .applications
         .iter()
         .find(|app| CastDeviceApp::from_str(app.app_id.as_str()).unwrap() == app_to_manage);
+
+    cast_device.connection.disconnect(med.dest_id.as_str())?;
     match app {
         Some(app) => {
-            cast_device
-                .connection
-                .connect(app.transport_id.as_str())
-                .unwrap();
+            cast_device.connection.connect(app.transport_id.as_str())?;
             let status = cast_device
                 .media
-                .get_status(app.transport_id.as_str(), None)
-                .unwrap();
+                .get_status(app.transport_id.as_str(), None)?;
             let status = status.entries.first().unwrap();
 
-            match command {
+            let status_after = match command {
                 ManageCommmand::Play => cast_device
                     .media
                     .play(app.transport_id.as_str(), status.media_session_id)
@@ -149,7 +147,11 @@ fn manage(
                     .stop(app.transport_id.as_str(), status.media_session_id)
                     .map(Into::into)
                     .map_err(ChromecastError::RustCastError),
-            }
+            };
+            cast_device
+                .connection
+                .disconnect(app.transport_id.as_str())?;
+            status_after
         }
         None => Err(ChromecastError::AppNotFound),
     }
@@ -179,6 +181,10 @@ fn get_status(med: &MediaReceiver) -> Result<ChromecastStatus, ChromecastError> 
                 .entries
                 .pop()
                 .map_or_else(|| Err(ChromecastError::AppStatusNotFound), Ok)?;
+            cast_device
+                .connection
+                .disconnect(app.transport_id.as_str())
+                .unwrap_or(());
             Ok(status.into())
         }
         None => Err(ChromecastError::AppNotFound),
@@ -233,18 +239,36 @@ fn cast(med: &MediaReceiver, url: Url) -> Result<(), ChromecastError> {
             }
             Ok(ChannelMessage::Connection(ConnectionResponse::Close)) => {
                 println!("[Close connection]");
+                cast_device
+                    .connection
+                    .disconnect(app.transport_id.as_str())?;
                 break;
             }
 
             Ok(ChannelMessage::Media(MediaResponse::LoadFailed(_)))
             | Ok(ChannelMessage::Media(MediaResponse::LoadCancelled(_))) => {
                 println!("[Loading failed]");
+                cast_device
+                    .connection
+                    .disconnect(app.transport_id.as_str())?;
                 break;
             }
 
             Ok(ChannelMessage::Connection(response)) => match response {
                 _ => println!("[Connection] {:?}", response),
             },
+            Ok(ChannelMessage::Media(MediaResponse::Status(v))) => {
+                if let Some(entry) = v.entries.first() {
+                    if entry.player_state.to_string() == "IDLE" {
+                        cast_device
+                            .connection
+                            .disconnect(app.transport_id.as_str())?;
+                        println!("[Close connection, idling...]");
+                        break;
+                    }
+                }
+                println!("[Status] {:?}", v);
+            }
             Ok(ChannelMessage::Media(response)) => println!("[Media] {:?}", response),
             Ok(ChannelMessage::Receiver(response)) => println!("[Receiver] {:?}", response),
             Ok(ChannelMessage::Raw(response)) => println!(
