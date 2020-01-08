@@ -146,7 +146,21 @@ async fn handle_other_request(
 
     match (request.method(), request.uri().path()) {
         (&Method::GET, "/get_media_files") => to_response(ui::get_media_files(state).await),
-        (&Method::GET, "/media_show") => ui::media_show(state, serde_json::from_str(&query)?).await,
+        (&Method::GET, "/media_show") => {
+            // Chrome is spamming with multiple requests on HTTP hosts, it causes ffmpeg to freak
+            // out. This may have something to do that first request has
+            // "Update-Insecure-Requests=1". This is mostly a testing problem but it seems to help if
+            // I wait a little bit between requests.
+            if let Some(v) = request.headers().get(hyper::header::USER_AGENT) {
+                if let Ok(vv) = v.to_str() {
+                    if vv.find("Chrome/").is_some() {
+                        tokio::time::delay_for(tokio::time::Duration::from_millis(500)).await;
+                    }
+                }
+            }
+
+            ui::media_show(state, serde_json::from_str(&query)?).await
+        }
         _ => Err(ApiError::NotFound),
     }
 }

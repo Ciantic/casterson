@@ -4,7 +4,6 @@ use hyper::Response;
 use std::sync::Arc;
 
 use crate::api::ApiResponse;
-use futures::stream::StreamExt;
 use hyper::header::HeaderValue;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -12,7 +11,6 @@ use std::path::PathBuf;
 use crate::api::ApiError;
 use crate::media;
 use crate::msg;
-use std::convert::Infallible;
 
 #[derive(Serialize)]
 pub struct MediaFilesResult {
@@ -56,7 +54,7 @@ pub async fn media_show(
         .send(msg::NotifyMessage::EncodingStarted)
         .unwrap();
     let stream = media::encode(file, request.encode_opts).await?;
-    let mut response = Response::new(Body::wrap_stream(stream.map(|e| Ok::<_, Infallible>(e))));
+    let mut response = Response::new(Body::wrap_stream(stream));
 
     // Headers
     response
@@ -64,6 +62,10 @@ pub async fn media_show(
         .insert("Content-Type", HeaderValue::from_static("video/mp4"));
     response
         .headers_mut()
-        .insert("Cache-Control", HeaderValue::from_static("no-cache"));
+        .insert("Cache-Control", HeaderValue::from_static("no-store"));
+    // response.headers_mut().insert(
+    //     "Content-Security-Policy",
+    //     HeaderValue::from_static("upgrade-insecure-requests"),
+    // );
     Ok(response)
 }

@@ -10,7 +10,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
-use tokio::stream::StreamExt;
+use futures::stream::TryStreamExt;
 use tokio_util::codec::{BytesCodec, FramedRead};
 use walkdir;
 
@@ -207,7 +207,7 @@ pub struct EncodeOpts {
 pub async fn encode<P: AsRef<Path>>(
     file: P,
     opts: EncodeOpts,
-) -> Result<impl Stream<Item = bytes::Bytes>, std::io::Error> {
+) -> Result<impl Stream<Item = Result<bytes::Bytes, std::io::Error>>, std::io::Error> {
     // Fallback to string based error
     let strerr = |err| std::io::Error::new(std::io::ErrorKind::Other, err);
 
@@ -279,14 +279,7 @@ pub async fn encode<P: AsRef<Path>>(
         .take()
         .map_or(Err(strerr("Unable to capture stdout")), Ok)?;
 
-    // Creates a stream of bytes which does not fail (intentionally)
-    Ok(FramedRead::new(stdout, BytesCodec::new()).map(|v| match v {
-        Ok(v) => BytesMut::freeze(v),
-        Err(err) => {
-            eprintln!("Unexpected IO error occured during encoding: {:?}", err);
-            bytes::Bytes::new()
-        }
-    }))
+    Ok(FramedRead::new(stdout, BytesCodec::new()).map_ok(|v| BytesMut::freeze(v)))
 }
 
 // Unit tests
