@@ -95,7 +95,7 @@ impl BaseMediaReceiver for MediaReceiver {
         cast(self, url)
     }
     fn get_status(&self) -> Result<ChromecastStatus, ChromecastError> {
-        get_status(self)
+        manage(self, ManageCommmand::Status)
     }
 }
 
@@ -103,6 +103,7 @@ enum ManageCommmand {
     Play,
     Pause,
     Stop,
+    Status,
 }
 
 fn manage(
@@ -112,7 +113,7 @@ fn manage(
     let cast_device = CastDevice::connect_without_host_verification(med.ip.to_string(), med.port)?;
 
     cast_device.connection.connect(med.dest_id.as_str())?;
-    cast_device.heartbeat.ping().unwrap();
+    cast_device.heartbeat.ping()?;
     let app_to_manage = CastDeviceApp::DefaultMediaReceiver;
     let status = cast_device.receiver.get_status()?;
     let app = status
@@ -127,65 +128,33 @@ fn manage(
             let status = cast_device
                 .media
                 .get_status(app.transport_id.as_str(), None)?;
-            let status = status.entries.first().unwrap();
+            let entry = status.entries.first().unwrap();
 
-            let status_after = match command {
+            let retstatus = match command {
                 ManageCommmand::Play => cast_device
                     .media
-                    .play(app.transport_id.as_str(), status.media_session_id)
+                    .play(app.transport_id.as_str(), entry.media_session_id)
                     .map(Into::into)
                     .map_err(ChromecastError::RustCastError),
 
                 ManageCommmand::Pause => cast_device
                     .media
-                    .pause(app.transport_id.as_str(), status.media_session_id)
+                    .pause(app.transport_id.as_str(), entry.media_session_id)
                     .map(Into::into)
                     .map_err(ChromecastError::RustCastError),
 
                 ManageCommmand::Stop => cast_device
                     .media
-                    .stop(app.transport_id.as_str(), status.media_session_id)
+                    .stop(app.transport_id.as_str(), entry.media_session_id)
                     .map(Into::into)
                     .map_err(ChromecastError::RustCastError),
+
+                ManageCommmand::Status => Ok(ChromecastStatus::from(entry.clone())),
             };
             cast_device
                 .connection
                 .disconnect(app.transport_id.as_str())?;
-            status_after
-        }
-        None => Err(ChromecastError::AppNotFound),
-    }
-}
-
-fn get_status(med: &MediaReceiver) -> Result<ChromecastStatus, ChromecastError> {
-    let cast_device = CastDevice::connect_without_host_verification(med.ip.to_string(), med.port)?;
-
-    // Connect and ping
-    cast_device.connection.connect(med.dest_id.as_str())?;
-    cast_device.heartbeat.ping()?;
-
-    // Manage app
-    let app_to_manage = CastDeviceApp::DefaultMediaReceiver;
-    let status = cast_device.receiver.get_status()?;
-    let app = status
-        .applications
-        .iter()
-        .find(|app| CastDeviceApp::from_str(app.app_id.as_str()).unwrap() == app_to_manage);
-
-    match app {
-        Some(app) => {
-            cast_device.connection.connect(app.transport_id.as_str())?;
-            let status = cast_device
-                .media
-                .get_status(app.transport_id.as_str(), None)?
-                .entries
-                .pop()
-                .map_or_else(|| Err(ChromecastError::AppStatusNotFound), Ok)?;
-            cast_device
-                .connection
-                .disconnect(app.transport_id.as_str())
-                .unwrap_or(());
-            Ok(status.into())
+            retstatus
         }
         None => Err(ChromecastError::AppNotFound),
     }
